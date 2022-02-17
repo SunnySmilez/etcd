@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"encoding/gob"
 	"encoding/json"
+	"fmt"
 	"log"
 	"sync"
 
@@ -40,6 +41,7 @@ type kv struct {
 
 func newKVStore(snapshotter *snap.Snapshotter, proposeC chan<- string, commitC <-chan *commit, errorC <-chan error) *kvstore {
 	s := &kvstore{proposeC: proposeC, kvStore: make(map[string]string), snapshotter: snapshotter}
+	fmt.Printf("s:%+v\n", s)
 	snapshot, err := s.loadSnapshot()
 	if err != nil {
 		log.Panic(err)
@@ -55,6 +57,7 @@ func newKVStore(snapshotter *snap.Snapshotter, proposeC chan<- string, commitC <
 	return s
 }
 
+// 读取指定key的数据
 func (s *kvstore) Lookup(key string) (string, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -62,14 +65,21 @@ func (s *kvstore) Lookup(key string) (string, bool) {
 	return v, ok
 }
 
+// 写入数据
 func (s *kvstore) Propose(k string, v string) {
 	var buf bytes.Buffer
 	if err := gob.NewEncoder(&buf).Encode(kv{k, v}); err != nil {
 		log.Fatal(err)
 	}
+	fmt.Printf("role:app-kvstore, set data to proposeC:%+v\n", buf.String())
 	s.proposeC <- buf.String()
 }
 
+/**
+恢复数据
+1. commitC管道没数据，则去查看是否有快照数据
+2. commitC有数据则重新写入到kv到map中
+*/
 func (s *kvstore) readCommits(commitC <-chan *commit, errorC <-chan error) {
 	for commit := range commitC {
 		if commit == nil {
@@ -104,12 +114,14 @@ func (s *kvstore) readCommits(commitC <-chan *commit, errorC <-chan error) {
 	}
 }
 
+// 将kv中的数据json格式化后返回
 func (s *kvstore) getSnapshot() ([]byte, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return json.Marshal(s.kvStore)
 }
 
+// 加载快照中的数据
 func (s *kvstore) loadSnapshot() (*raftpb.Snapshot, error) {
 	snapshot, err := s.snapshotter.Load()
 	if err == snap.ErrNoSnapshot {
@@ -121,6 +133,7 @@ func (s *kvstore) loadSnapshot() (*raftpb.Snapshot, error) {
 	return snapshot, nil
 }
 
+// 将快照中的数据写入到kv中
 func (s *kvstore) recoverFromSnapshot(snapshot []byte) error {
 	var store map[string]string
 	if err := json.Unmarshal(snapshot, &store); err != nil {

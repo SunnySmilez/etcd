@@ -91,24 +91,24 @@ func newRaftNode(id int, peers []string, join bool, getSnapshot func() ([]byte, 
 	errorC := make(chan error)
 
 	rc := &raftNode{
-		proposeC:    proposeC,
-		confChangeC: confChangeC,
+		proposeC:    proposeC,    // kv相关配置
+		confChangeC: confChangeC, // 集群相关配置
 		commitC:     commitC,
 		errorC:      errorC,
-		id:          id,
-		peers:       peers,
+		id:          id,    // 集群id
+		peers:       peers, // 集群的节点地址
 		join:        join,
 		waldir:      fmt.Sprintf("raftexample-%d", id),
 		snapdir:     fmt.Sprintf("raftexample-%d-snap", id),
-		getSnapshot: getSnapshot,
-		snapCount:   defaultSnapshotCount,
+		getSnapshot: getSnapshot,          // json后的kv数据
+		snapCount:   defaultSnapshotCount, // 默认snap的数据条数
 		stopc:       make(chan struct{}),
 		httpstopc:   make(chan struct{}),
 		httpdonec:   make(chan struct{}),
 
 		logger: zap.NewExample(),
 
-		snapshotterReady: make(chan *snap.Snapshotter, 1),
+		snapshotterReady: make(chan *snap.Snapshotter, 1), // snap写入对象
 		// rest of structure populated after WAL replay
 	}
 	go rc.startRaft()
@@ -124,15 +124,19 @@ func (rc *raftNode) saveSnap(snap raftpb.Snapshot) error {
 	// save the snapshot file before writing the snapshot to the wal.
 	// This makes it possible for the snapshot file to become orphaned, but prevents
 	// a WAL snapshot entry from having no corresponding snapshot file.
+	// 写入.snap文件
 	if err := rc.snapshotter.SaveSnap(snap); err != nil {
 		return err
 	}
+	// 这里记录的是term，index等信息
 	if err := rc.wal.SaveSnapshot(walSnap); err != nil {
 		return err
 	}
+	// 释放锁
 	return rc.wal.ReleaseLockTo(snap.Metadata.Index)
 }
 
+// 判断是否写入raftpb entry
 func (rc *raftNode) entriesToApply(ents []raftpb.Entry) (nents []raftpb.Entry) {
 	if len(ents) == 0 {
 		return ents
@@ -149,6 +153,7 @@ func (rc *raftNode) entriesToApply(ents []raftpb.Entry) (nents []raftpb.Entry) {
 
 // publishEntries writes committed log entries to commit channel and returns
 // whether all entries could be published.
+// 将数据写入 raftnode commitC
 func (rc *raftNode) publishEntries(ents []raftpb.Entry) (<-chan struct{}, bool) {
 	if len(ents) == 0 {
 		return nil, true
@@ -200,9 +205,11 @@ func (rc *raftNode) publishEntries(ents []raftpb.Entry) (<-chan struct{}, bool) 
 	return applyDoneC, true
 }
 
+// 从snap取数据，需判断term和index的版本
 func (rc *raftNode) loadSnapshot() *raftpb.Snapshot {
 	if wal.Exist(rc.waldir) {
 		walSnaps, err := wal.ValidSnapshotEntries(rc.logger, rc.waldir)
+		fmt.Printf("walSnaps:%+v, rc.logger:%+v, rc.waldir:%+v\n", walSnaps, rc.logger, rc.waldir)
 		if err != nil {
 			log.Fatalf("raftexample: error listing snapshots (%v)", err)
 		}
@@ -243,9 +250,11 @@ func (rc *raftNode) openWAL(snapshot *raftpb.Snapshot) *wal.WAL {
 }
 
 // replayWAL replays WAL entries into the raft instance.
+// 从wal读取数据，写入到kv中
 func (rc *raftNode) replayWAL() *wal.WAL {
 	log.Printf("replaying WAL of member %d", rc.id)
-	snapshot := rc.loadSnapshot()
+	snapshot := rc.loadSnapshot() // 从snap加载数据
+	fmt.Printf("snapshot:%+v\n", snapshot)
 	w := rc.openWAL(snapshot)
 	_, st, ents, err := w.ReadAll()
 	if err != nil {
@@ -271,7 +280,9 @@ func (rc *raftNode) writeError(err error) {
 	rc.node.Stop()
 }
 
+//
 func (rc *raftNode) startRaft() {
+	// 初始化snapshotter
 	if !fileutil.Exist(rc.snapdir) {
 		if err := os.Mkdir(rc.snapdir, 0750); err != nil {
 			log.Fatalf("raftexample: cannot create dir for snapshot (%v)", err)
@@ -299,7 +310,7 @@ func (rc *raftNode) startRaft() {
 		MaxUncommittedEntriesSize: 1 << 30,
 	}
 
-	if oldwal || rc.join {
+	if oldwal || rc.join { // 之前启动过，或者join参数为true，则restart节点
 		rc.node = raft.RestartNode(c)
 	} else {
 		rc.node = raft.StartNode(c, rpeers)
@@ -315,7 +326,7 @@ func (rc *raftNode) startRaft() {
 		ErrorC:      make(chan error),
 	}
 
-	rc.transport.Start()
+	rc.transport.Start() // 启动raft的http
 	for i := range rc.peers {
 		if i+1 != rc.id {
 			rc.transport.AddPeer(types.ID(i+1), []string{rc.peers[i]})
@@ -379,6 +390,7 @@ func (rc *raftNode) maybeTriggerSnapshot(applyDoneC <-chan struct{}) {
 	if err != nil {
 		log.Panic(err)
 	}
+	// 返回snap数据
 	snap, err := rc.raftStorage.CreateSnapshot(rc.appliedIndex, &rc.confState, data)
 	if err != nil {
 		panic(err)
@@ -399,6 +411,7 @@ func (rc *raftNode) maybeTriggerSnapshot(applyDoneC <-chan struct{}) {
 	rc.snapshotIndex = rc.appliedIndex
 }
 
+// 做wal及snap等操作
 func (rc *raftNode) serveChannels() {
 	snap, err := rc.raftStorage.Snapshot()
 	if err != nil {
@@ -419,15 +432,16 @@ func (rc *raftNode) serveChannels() {
 
 		for rc.proposeC != nil && rc.confChangeC != nil {
 			select {
-			case prop, ok := <-rc.proposeC:
+			case prop, ok := <-rc.proposeC: // 读取数据
 				if !ok {
 					rc.proposeC = nil
 				} else {
 					// blocks until accepted by raft state machine
-					rc.node.Propose(context.TODO(), []byte(prop))
+					fmt.Printf("role:app-raft, get proposeC data:%+v\n", prop)
+					rc.node.Propose(context.TODO(), []byte(prop)) // 数据写入到节点中
 				}
 
-			case cc, ok := <-rc.confChangeC:
+			case cc, ok := <-rc.confChangeC: // 读取集群变更消息
 				if !ok {
 					rc.confChangeC = nil
 				} else {
@@ -448,21 +462,37 @@ func (rc *raftNode) serveChannels() {
 			rc.node.Tick()
 
 		// store raft entries to wal, then publish over commit channel
-		case rd := <-rc.node.Ready():
+		case rd := <-rc.node.Ready(): // node将数据写入到readyc后，这边读取数据
+			if len(rd.Messages) != 0 && rd.Messages[0].Type != raftpb.MsgHeartbeat && rd.Messages[0].Type != raftpb.MsgHeartbeatResp {
+				fmt.Printf("role:raft, after node write data to readyc, read the data\n")
+			}
+
+			// 写入wal文件(包含数据和state值)
 			rc.wal.Save(rd.HardState, rd.Entries)
+			// snap不存在，先写入snap
 			if !raft.IsEmptySnap(rd.Snapshot) {
 				rc.saveSnap(rd.Snapshot)
+				// 往memoryStoryge写入数据
 				rc.raftStorage.ApplySnapshot(rd.Snapshot)
+				// 数据写入raft node
 				rc.publishSnapshot(rd.Snapshot)
 			}
 			rc.raftStorage.Append(rd.Entries)
-			rc.transport.Send(rd.Messages)
+			// 向node发送消息
+			rc.transport.Send(rd.Messages) // 数据写入writec
+			// 将数据写入 raftnode commitC
+			if len(rd.Messages) != 0 && rd.Messages[0].Type != raftpb.MsgHeartbeat && rd.Messages[0].Type != raftpb.MsgHeartbeatResp {
+				fmt.Printf("role: raft rd.CommittedEntries:%+v rd.Message:%+v\n", rd.CommittedEntries, rd.Messages)
+			}
+
 			applyDoneC, ok := rc.publishEntries(rc.entriesToApply(rd.CommittedEntries))
 			if !ok {
 				rc.stop()
 				return
 			}
+			// 记录snap数据
 			rc.maybeTriggerSnapshot(applyDoneC)
+			//raft.node 写入advancec空数据
 			rc.node.Advance()
 
 		case err := <-rc.transport.ErrorC:
@@ -476,13 +506,13 @@ func (rc *raftNode) serveChannels() {
 	}
 }
 
-func (rc *raftNode) serveRaft() {
-	url, err := url.Parse(rc.peers[rc.id-1])
+func (rc *raftNode) serveRaft() { //启动raft服务
+	url, err := url.Parse(rc.peers[rc.id-1]) // 获取节点地址
 	if err != nil {
 		log.Fatalf("raftexample: Failed parsing URL (%v)", err)
 	}
 
-	ln, err := newStoppableListener(url.Host, rc.httpstopc)
+	ln, err := newStoppableListener(url.Host, rc.httpstopc) // 启动一个tcp监听，并处理异常
 	if err != nil {
 		log.Fatalf("raftexample: Failed to listen rafthttp (%v)", err)
 	}

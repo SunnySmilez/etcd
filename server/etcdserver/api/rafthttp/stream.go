@@ -157,9 +157,9 @@ func (cw *streamWriter) run() {
 		msgc       chan raftpb.Message
 		heartbeatc <-chan time.Time
 		t          streamType
-		enc        encoder
-		flusher    http.Flusher
-		batched    int
+		enc        encoder      // 编码器，负责将消息序列化并将数据写入连接的缓冲区
+		flusher    http.Flusher // 将数据发送出去
+		batched    int          // 当前未flush出去的数据
 	)
 	tickc := time.NewTicker(ConnReadTimeout / 3)
 	defer tickc.Stop()
@@ -200,13 +200,17 @@ func (cw *streamWriter) run() {
 			}
 			heartbeatc, msgc = nil, nil
 
-		case m := <-msgc:
-			err := enc.encode(&m)
+		case m := <-msgc: // 读取send写入msgc的数据
+			if m.Type == raftpb.MsgProp {
+				fmt.Printf("send msg to encode m:%+v\n", m)
+			}
+
+			err := enc.encode(&m) // 消息进行编码并写入连接缓冲区
 			if err == nil {
 				unflushed += m.Size()
 
 				if len(msgc) == 0 || batched > streamBufSize/2 {
-					flusher.Flush()
+					flusher.Flush() // 将数据刷入到对端
 					sentBytes.WithLabelValues(cw.peerID.String()).Add(float64(unflushed))
 					unflushed = 0
 					batched = 0
@@ -217,6 +221,7 @@ func (cw *streamWriter) run() {
 				continue
 			}
 
+			// 消息发送异常处理
 			cw.status.deactivate(failureType{source: t.String(), action: "write"}, err.Error())
 			cw.close()
 			if cw.lg != nil {
@@ -231,15 +236,15 @@ func (cw *streamWriter) run() {
 			cw.r.ReportUnreachable(m.To)
 			sentFailures.WithLabelValues(cw.peerID.String()).Inc()
 
-		case conn := <-cw.connc:
+		case conn := <-cw.connc: // streamReader创建连接时，连接实例会写入streamWriter.connc通道，此处获取通道并进行绑定
 			cw.mu.Lock()
 			closed := cw.closeUnlocked()
 			t = conn.t
 			switch conn.t {
 			case streamTypeMsgAppV2:
-				enc = newMsgAppV2Encoder(conn.Writer, cw.fs)
+				enc = newMsgAppV2Encoder(conn.Writer, cw.fs) // 实例化enc对象
 			case streamTypeMessage:
-				enc = &messageEncoder{w: conn.Writer}
+				enc = &messageEncoder{w: conn.Writer} // 实例化enc对象，数据会临时写入conn.Writer中
 			default:
 				if cw.lg != nil {
 					cw.lg.Panic("unhandled stream type", zap.String("stream-type", t.String()))
@@ -336,6 +341,7 @@ func (cw *streamWriter) closeUnlocked() bool {
 	return true
 }
 
+// 将连接实例写入streamWriter.connc
 func (cw *streamWriter) attach(conn *outgoingConn) bool {
 	select {
 	case cw.connc <- conn:
@@ -401,7 +407,7 @@ func (cr *streamReader) run() {
 	}
 
 	for {
-		rc, err := cr.dial(t)
+		rc, err := cr.dial(t) // 连接对端
 		if err != nil {
 			if err != errUnsupportedStreamType {
 				cr.status.deactivate(failureType{source: t.String(), action: "dial"}, err.Error())
@@ -416,7 +422,7 @@ func (cr *streamReader) run() {
 					zap.String("remote-peer-id", cr.peerID.String()),
 				)
 			}
-			err = cr.decodeLoop(rc, t)
+			err = cr.decodeLoop(rc, t) // 读取数据，写入streamReader.recvc/streamReader.propc
 			if cr.lg != nil {
 				cr.lg.Warn(
 					"lost TCP streaming connection with remote peer",
@@ -463,10 +469,11 @@ func (cr *streamReader) run() {
 	}
 }
 
+// 从dec.decode中读取数据，写入到channel(streamReader.recvs/streamReader.propc)
 func (cr *streamReader) decodeLoop(rc io.ReadCloser, t streamType) error {
 	var dec decoder
 	cr.mu.Lock()
-	switch t {
+	switch t { // 根据信息类型，实例化decode对象
 	case streamTypeMsgAppV2:
 		dec = newMsgAppV2Decoder(rc, cr.tr.ID, cr.peerID)
 	case streamTypeMessage:
@@ -490,7 +497,7 @@ func (cr *streamReader) decodeLoop(rc io.ReadCloser, t streamType) error {
 
 	// gofail: labelRaftDropHeartbeat:
 	for {
-		m, err := dec.decode()
+		m, err := dec.decode() // 读取数据
 		if err != nil {
 			cr.mu.Lock()
 			cr.close()
@@ -518,12 +525,12 @@ func (cr *streamReader) decodeLoop(rc io.ReadCloser, t streamType) error {
 		}
 
 		recvc := cr.recvc
-		if m.Type == raftpb.MsgProp {
+		if m.Type == raftpb.MsgProp { // msgProp类型则写入streamReader.propc
 			recvc = cr.propc
 		}
 
 		select {
-		case recvc <- m:
+		case recvc <- m: //数据写入streamReader.recvs/streamReader.propc
 		default:
 			if cr.status.isActive() {
 				if cr.lg != nil {

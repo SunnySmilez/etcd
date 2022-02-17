@@ -204,7 +204,8 @@ func (p *ProgressTracker) Visit(f func(id uint64, pr *Progress)) {
 		n--
 		ids[n] = id
 	}
-	insertionSort(ids)
+	//fmt.Printf("role:raft-tracker ids:%+v\n", ids)// 此处打印的是node的id值
+	insertionSort(ids) //todo 没弄懂要做什么
 	for _, id := range ids {
 		f(id, p.Progress[id])
 	}

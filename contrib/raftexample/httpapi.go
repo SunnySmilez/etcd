@@ -15,6 +15,7 @@
 package main
 
 import (
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -41,12 +42,14 @@ func (h *httpKVAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		fmt.Printf("method:%+v,key:%+v, v:%+v\n", http.MethodPut, key, string(v))
 		h.store.Propose(key, string(v))
 
 		// Optimistic-- no waiting for ack from raft. Value is not yet
 		// committed so a subsequent GET on the key may return old value
 		w.WriteHeader(http.StatusNoContent)
 	case http.MethodGet:
+		fmt.Printf("method:%+v, key:%+v\n", http.MethodGet, key)
 		if v, ok := h.store.Lookup(key); ok {
 			w.Write([]byte(v))
 		} else {
@@ -67,6 +70,7 @@ func (h *httpKVAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		fmt.Printf("method:%+v, url:%+v, nodeID:%+v\n", http.MethodPost, url, nodeId)
 		cc := raftpb.ConfChange{
 			Type:    raftpb.ConfChangeAddNode,
 			NodeID:  nodeId,
@@ -77,6 +81,7 @@ func (h *httpKVAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 	case http.MethodDelete:
 		nodeId, err := strconv.ParseUint(key[1:], 0, 64)
+		fmt.Printf("method:%+v, nodeId:%+v\n", http.MethodDelete, nodeId)
 		if err != nil {
 			log.Printf("Failed to convert ID for conf change (%v)\n", err)
 			http.Error(w, "Failed on DELETE", http.StatusBadRequest)

@@ -75,6 +75,7 @@ func (s *Snapshotter) save(snapshot *raftpb.Snapshot) error {
 	start := time.Now()
 
 	fname := fmt.Sprintf("%016x-%016x%s", snapshot.Metadata.Term, snapshot.Metadata.Index, snapSuffix)
+	fmt.Printf("role:snap fname:%s\n", fname)
 	b := pbutil.MustMarshal(snapshot)
 	crc := crc32.Update(0, crcTable, b)
 	snap := snappb.Snapshot{Crc: crc, Data: b}
@@ -85,7 +86,7 @@ func (s *Snapshotter) save(snapshot *raftpb.Snapshot) error {
 	snapMarshallingSec.Observe(time.Since(start).Seconds())
 
 	spath := filepath.Join(s.dir, fname)
-
+	fmt.Printf("role:snap spath:%s\n", spath)
 	fsyncStart := time.Now()
 	err = pioutil.WriteAndSyncFile(spath, d, 0666)
 	snapFsyncSec.Observe(time.Since(fsyncStart).Seconds())

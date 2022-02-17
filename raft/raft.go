@@ -383,6 +383,7 @@ func (r *raft) hardState() pb.HardState {
 
 // send schedules persisting state to a stable storage and AFTER that
 // sending the message (as part of next Ready message processing).
+// 当Type=MsgProp，将数据写入msgs
 func (r *raft) send(m pb.Message) {
 	if m.From == None {
 		m.From = r.id
@@ -420,7 +421,7 @@ func (r *raft) send(m pb.Message) {
 
 // sendAppend sends an append RPC with new entries (if any) and the
 // current commit index to the given peer.
-func (r *raft) sendAppend(to uint64) {
+func (r *raft) sendAppend(to uint64) { // 数据发送给别的节点
 	r.maybeSendAppend(to, true)
 }
 
@@ -429,9 +430,11 @@ func (r *raft) sendAppend(to uint64) {
 // argument controls whether messages with no entries will be sent
 // ("empty" messages are useful to convey updated Commit indexes, but
 // are undesirable when we're sending multiple messages in a batch).
+// 往flower同步数据
 func (r *raft) maybeSendAppend(to uint64, sendIfEmpty bool) bool {
 	pr := r.prs.Progress[to]
-	if pr.IsPaused() {
+	fmt.Printf("role:raft,method:maybeSendAppend pr:%+v\n", pr)
+	if pr.IsPaused() { // 判断接收节点状态
 		return false
 	}
 	m := pb.Message{}
@@ -473,12 +476,13 @@ func (r *raft) maybeSendAppend(to uint64, sendIfEmpty bool) bool {
 		m.LogTerm = term
 		m.Entries = ents
 		m.Commit = r.raftLog.committed
+		fmt.Printf("roel:raft-leader pr.Inflights:%+v\n", *pr.Inflights)
 		if n := len(m.Entries); n != 0 {
 			switch pr.State {
 			// optimistically increase the next when in StateReplicate
 			case tracker.StateReplicate:
 				last := m.Entries[n-1].Index
-				pr.OptimisticUpdate(last)
+				pr.OptimisticUpdate(last) // 设置pr.next的值
 				pr.Inflights.Add(last)
 			case tracker.StateProbe:
 				pr.ProbeSent = true
@@ -487,6 +491,7 @@ func (r *raft) maybeSendAppend(to uint64, sendIfEmpty bool) bool {
 			}
 		}
 	}
+	fmt.Printf("leader send msg:%+v\n", m)
 	r.send(m)
 	return true
 }
@@ -618,14 +623,16 @@ func (r *raft) reset(term uint64) {
 	r.readOnly = newReadOnly(r.readOnly.option)
 }
 
+// 数据写入到raftlog，同时对flower做回应，处理提交对index（leader调用该函数）
 func (r *raft) appendEntry(es ...pb.Entry) (accepted bool) {
-	li := r.raftLog.lastIndex()
+	fmt.Printf("role:raft-leader,method:appendEntry, es:%+v", es)
+	li := r.raftLog.lastIndex() // 获取raftlog的最后的key
 	for i := range es {
 		es[i].Term = r.Term
 		es[i].Index = li + 1 + uint64(i)
 	}
 	// Track the size of this uncommitted proposal.
-	if !r.increaseUncommittedSize(es) {
+	if !r.increaseUncommittedSize(es) { // 记录未处理的数据大小
 		r.logger.Debugf(
 			"%x appending new entries to log would exceed uncommitted entry size limit; dropping proposal",
 			r.id,
@@ -634,8 +641,8 @@ func (r *raft) appendEntry(es ...pb.Entry) (accepted bool) {
 		return false
 	}
 	// use latest "last" index after truncate/append
-	li = r.raftLog.append(es...)
-	r.prs.Progress[r.id].MaybeUpdate(li)
+	li = r.raftLog.append(es...)         // 数据追加到raftlog，记录到r.raftLog.unstable
+	r.prs.Progress[r.id].MaybeUpdate(li) // 响应flower
 	// Regardless of maybeCommit's return, our caller will call bcastAppend.
 	r.maybeCommit()
 	return true
@@ -844,8 +851,11 @@ func (r *raft) poll(id uint64, t pb.MessageType, v bool) (granted int, rejected 
 	return r.prs.TallyVotes()
 }
 
+// 此处处理所有的消息
 func (r *raft) Step(m pb.Message) error {
+	//fmt.Printf("raft info:%+v\n node info:%+v\n", r, m)
 	// Handle the message term, which may result in our stepping down to a follower.
+	//todo 此处应该是异常数据处理
 	switch {
 	case m.Term == 0:
 		// local message
@@ -978,7 +988,11 @@ func (r *raft) Step(m pb.Message) error {
 		}
 
 	default:
-		err := r.step(r, m)
+		if pb.MsgProp == m.Type {
+			fmt.Printf("role:raft,MsgProp run here, r.step:%+v\n", r.step)
+		}
+
+		err := r.step(r, m) // todo 如何知道注册的是那个step函数？
 		if err != nil {
 			return err
 		}
@@ -988,6 +1002,7 @@ func (r *raft) Step(m pb.Message) error {
 
 type stepFunc func(r *raft, m pb.Message) error
 
+// 此处处理主的数据
 func stepLeader(r *raft, m pb.Message) error {
 	// These message types do not require any progress for m.From.
 	switch m.Type {
@@ -1017,6 +1032,7 @@ func stepLeader(r *raft, m pb.Message) error {
 		})
 		return nil
 	case pb.MsgProp:
+		fmt.Printf("role:raft-leader, raft:%+v\n message:%+v\n", r, m)
 		if len(m.Entries) == 0 {
 			r.logger.Panicf("%x stepped empty MsgProp", r.id)
 		}
@@ -1031,22 +1047,25 @@ func stepLeader(r *raft, m pb.Message) error {
 			return ErrProposalDropped
 		}
 
-		for i := range m.Entries {
+		for i := range m.Entries { // 写入数据
 			e := &m.Entries[i]
 			var cc pb.ConfChangeI
-			if e.Type == pb.EntryConfChange {
+			if e.Type == pb.EntryConfChange { //这里应该是集群信息变更
+				fmt.Printf("role:raft-leader,e.Type == pb.EntryConfChange")
 				var ccc pb.ConfChange
 				if err := ccc.Unmarshal(e.Data); err != nil {
 					panic(err)
 				}
 				cc = ccc
 			} else if e.Type == pb.EntryConfChangeV2 {
+				fmt.Printf("role:raft-leader,e.Type == pb.EntryConfChangeV2")
 				var ccc pb.ConfChangeV2
 				if err := ccc.Unmarshal(e.Data); err != nil {
 					panic(err)
 				}
 				cc = ccc
 			}
+			fmt.Printf("role:raft-leader,cc:%+v\n", cc)
 			if cc != nil {
 				alreadyPending := r.pendingConfIndex > r.raftLog.applied
 				alreadyJoint := len(r.prs.Config.Voters[1]) > 0
@@ -1418,18 +1437,20 @@ func stepCandidate(r *raft, m pb.Message) error {
 	return nil
 }
 
+// 此处处理从的数据
 func stepFollower(r *raft, m pb.Message) error {
 	switch m.Type {
 	case pb.MsgProp:
-		if r.lead == None {
+		fmt.Printf("role:raft, raft:%+v\n message:%+v\n", r, m)
+		if r.lead == None { // 判断是否存在leader节点
 			r.logger.Infof("%x no leader at term %d; dropping proposal", r.id, r.Term)
 			return ErrProposalDropped
-		} else if r.disableProposalForwarding {
+		} else if r.disableProposalForwarding { // todo 应该是没同步leader的数据
 			r.logger.Infof("%x not forwarding to leader %x at term %d; dropping proposal", r.id, r.lead, r.Term)
 			return ErrProposalDropped
 		}
 		m.To = r.lead
-		r.send(m)
+		r.send(m) // 主写数据
 	case pb.MsgApp:
 		r.electionElapsed = 0
 		r.lead = m.From

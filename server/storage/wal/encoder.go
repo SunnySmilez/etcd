@@ -59,6 +59,7 @@ func newFileEncoder(f *os.File, prevCrc uint32) (*encoder, error) {
 	return newEncoder(f, prevCrc, int(offset)), nil
 }
 
+// 写入数据
 func (e *encoder) encode(rec *walpb.Record) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()

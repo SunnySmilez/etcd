@@ -296,6 +296,7 @@ type EtcdServer struct {
 
 // NewServer creates a new EtcdServer from the supplied configuration. The
 // configuration is considered static for the lifetime of the EtcdServer.
+// 服务启动入口
 func NewServer(cfg config.ServerConfig) (srv *EtcdServer, err error) {
 	b, err := bootstrap(cfg)
 	if err != nil {
@@ -683,6 +684,7 @@ func (h *downgradeEnabledHandler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 
 // Process takes a raft message and applies it to the server's raft state
 // machine, respecting any timeout of the given context.
+// 接收消息的时候，调用该方法处理
 func (s *EtcdServer) Process(ctx context.Context, m raftpb.Message) error {
 	lg := s.Logger()
 	if s.cluster.IsIDRemoved(types.ID(m.From)) {

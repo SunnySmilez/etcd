@@ -203,9 +203,9 @@ func (l *raftLog) hasPendingSnapshot() bool {
 
 func (l *raftLog) snapshot() (pb.Snapshot, error) {
 	if l.unstable.snapshot != nil {
-		return *l.unstable.snapshot, nil
+		return *l.unstable.snapshot, nil // 返回未commit的snashot
 	}
-	return l.storage.Snapshot()
+	return l.storage.Snapshot() //加锁获取MemoryStorage中的snapshot
 }
 
 func (l *raftLog) firstIndex() uint64 {

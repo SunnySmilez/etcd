@@ -896,6 +896,7 @@ func (w *WAL) Close() error {
 	return w.dirFile.Close()
 }
 
+// 存储数据
 func (w *WAL) saveEntry(e *raftpb.Entry) error {
 	// TODO: add MustMarshalTo to reduce one allocation.
 	b := pbutil.MustMarshal(e)
@@ -917,6 +918,7 @@ func (w *WAL) saveState(s *raftpb.HardState) error {
 	return w.encoder.encode(rec)
 }
 
+// 存储到wal文件
 func (w *WAL) Save(st raftpb.HardState, ents []raftpb.Entry) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -926,15 +928,16 @@ func (w *WAL) Save(st raftpb.HardState, ents []raftpb.Entry) error {
 		return nil
 	}
 
-	mustSync := raft.MustSync(st, w.state, len(ents))
+	mustSync := raft.MustSync(st, w.state, len(ents)) // 是否强制同步
 
 	// TODO(xiangli): no more reference operator
+	fmt.Printf("role:wal ents:%+v， st：%+v, mustSync:%+v\n", ents, st, mustSync)
 	for i := range ents {
-		if err := w.saveEntry(&ents[i]); err != nil {
+		if err := w.saveEntry(&ents[i]); err != nil { // 存储数据
 			return err
 		}
 	}
-	if err := w.saveState(&st); err != nil {
+	if err := w.saveState(&st); err != nil { // 这里记录的是状态数据{Term:0 Vote:0 Commit:0}
 		return err
 	}
 
@@ -949,7 +952,7 @@ func (w *WAL) Save(st raftpb.HardState, ents []raftpb.Entry) error {
 		return nil
 	}
 
-	return w.cut()
+	return w.cut() // 切割文件
 }
 
 func (w *WAL) SaveSnapshot(e walpb.Snapshot) error {

@@ -16,6 +16,7 @@ package rafthttp
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 
@@ -233,6 +234,7 @@ func startPeer(t *Transport, urls types.URLs, peerID types.ID, fs *stats.Followe
 	return p
 }
 
+// 将数据写入writec(streamWriter.msgc)
 func (p *peer) send(m raftpb.Message) {
 	p.mu.Lock()
 	paused := p.paused
@@ -245,8 +247,12 @@ func (p *peer) send(m raftpb.Message) {
 	writec, name := p.pick(m)
 	select {
 	case writec <- m:
+		if m.Type != raftpb.MsgHeartbeat && m.Type != raftpb.MsgHeartbeatResp {
+			fmt.Printf("role:peer writec here m %+v\n", m)
+		}
 	default:
-		p.r.ReportUnreachable(m.To)
+		fmt.Printf("role:peer here m %+v\n", m)
+		p.r.ReportUnreachable(m.To) //数据写入到n.recvc
 		if isMsgSnap(m) {
 			p.r.ReportSnapshot(m.To, raft.SnapshotFailure)
 		}
@@ -277,9 +283,9 @@ func (p *peer) attachOutgoingConn(conn *outgoingConn) {
 	var ok bool
 	switch conn.t {
 	case streamTypeMsgAppV2:
-		ok = p.msgAppV2Writer.attach(conn)
+		ok = p.msgAppV2Writer.attach(conn) // 连接信息写入streamWrite.connc
 	case streamTypeMessage:
-		ok = p.writer.attach(conn)
+		ok = p.writer.attach(conn) // 连接信息写入streamWrite.connc
 	default:
 		if p.lg != nil {
 			p.lg.Panic("unknown stream type", zap.String("type", conn.t.String()))
@@ -334,6 +340,7 @@ func (p *peer) stop() {
 
 // pick picks a chan for sending the given message. The picked chan and the picked chan
 // string name are returned.
+// writec()函数将数据写入streamWriter.msgc
 func (p *peer) pick(m raftpb.Message) (writec chan<- raftpb.Message, picked string) {
 	var ok bool
 	// Considering MsgSnap may have a big size, e.g., 1G, and will block

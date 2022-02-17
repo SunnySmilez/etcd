@@ -83,6 +83,10 @@ func newMsgAppV2Encoder(w io.Writer, fs *stats.FollowerStats) *msgAppV2Encoder {
 }
 
 func (enc *msgAppV2Encoder) encode(m *raftpb.Message) error {
+	if m.Type == raftpb.MsgProp {
+		fmt.Printf("here is msgAppV2Encoder encode \n")
+	}
+
 	start := time.Now()
 	switch {
 	case isLinkHeartbeatMessage(m):

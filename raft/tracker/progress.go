@@ -202,7 +202,7 @@ func (pr *Progress) IsPaused() bool {
 	switch pr.State {
 	case StateProbe:
 		return pr.ProbeSent
-	case StateReplicate:
+	case StateReplicate: // 同步数据
 		return pr.Inflights.Full()
 	case StateSnapshot:
 		return true

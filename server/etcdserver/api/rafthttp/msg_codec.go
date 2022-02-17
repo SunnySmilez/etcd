@@ -17,6 +17,7 @@ package rafthttp
 import (
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"io"
 
 	"go.etcd.io/etcd/pkg/v3/pbutil"
@@ -30,7 +31,11 @@ type messageEncoder struct {
 }
 
 func (enc *messageEncoder) encode(m *raftpb.Message) error {
-	if err := binary.Write(enc.w, binary.BigEndian, uint64(m.Size())); err != nil {
+	if m.Type == raftpb.MsgProp {
+		fmt.Printf("encode is here m:%+v\n", m)
+	}
+
+	if err := binary.Write(enc.w, binary.BigEndian, uint64(m.Size())); err != nil { // stream调用的时候，会将数据写入到connc.writer中（实例化enc.w）
 		return err
 	}
 	_, err := enc.w.Write(pbutil.MustMarshal(m))

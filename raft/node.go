@@ -17,8 +17,9 @@ package raft
 import (
 	"context"
 	"errors"
-
+	"fmt"
 	pb "go.etcd.io/etcd/raft/v3/raftpb"
+	"time"
 )
 
 type SnapshotStatus int
@@ -230,6 +231,7 @@ func StartNode(c *Config, peers []Peer) Node {
 
 	n := newNode(rn)
 
+	fmt.Print("star node \n")
 	go n.run()
 	return &n
 }
@@ -244,6 +246,7 @@ func RestartNode(c *Config) Node {
 		panic(err)
 	}
 	n := newNode(rn)
+	fmt.Print("restart node \n")
 	go n.run()
 	return &n
 }
@@ -300,6 +303,7 @@ func (n *node) Stop() {
 	<-n.done
 }
 
+// node跟raft数据写入逻辑
 func (n *node) run() {
 	var propc chan msgWithResult
 	var readyc chan Ready
@@ -313,7 +317,8 @@ func (n *node) run() {
 	for {
 		if advancec != nil {
 			readyc = nil
-		} else if n.rn.HasReady() {
+		} else if n.rn.HasReady() { // 此处会一直读取数据
+			//fmt.Printf("here?n:%+v\n", n)
 			// Populate a Ready. Note that this Ready is not guaranteed to
 			// actually be handled. We will arm readyc, but there's no guarantee
 			// that we will actually send on it. It's possible that we will
@@ -323,6 +328,11 @@ func (n *node) run() {
 			// it simplifies testing (by emitting less frequently and more
 			// predictably).
 			rd = n.rn.readyWithoutAccept()
+			// 查看MsgProp日志，不是项目代码
+			if len(r.msgs) != 0 && rd.Messages[0].Type != pb.MsgHeartbeat && rd.Messages[0].Type != pb.MsgHeartbeatResp {
+				fmt.Printf("n.readyc:%+v\n", n.readyc)
+			}
+
 			readyc = n.readyc
 		}
 
@@ -346,6 +356,8 @@ func (n *node) run() {
 		// described in raft dissertation)
 		// Currently it is dropped in Step silently.
 		case pm := <-propc:
+			// 消费Propose->stepWait写入的数据
+			fmt.Printf("role:node, deal n.propc data who is send by step/stepWait, time:%+v\n", time.Now())
 			m := pm.m
 			m.From = r.id
 			err := r.Step(m)
@@ -391,10 +403,17 @@ func (n *node) run() {
 			}
 		case <-n.tickc:
 			n.rn.Tick()
-		case readyc <- rd:
-			n.rn.acceptReady(rd)
-			advancec = n.advancec
+		case readyc <- rd: // 写入数据到readyc
+			if len(r.msgs) != 0 && rd.Messages[0].Type != pb.MsgHeartbeat && rd.Messages[0].Type != pb.MsgHeartbeatResp {
+				fmt.Printf("role:node, write data to readyc\n")
+			}
+			n.rn.acceptReady(rd)  // 将数据删除
+			advancec = n.advancec // advances写入数据
 		case <-advancec:
+			if len(r.msgs) != 0 && rd.Messages[0].Type != pb.MsgHeartbeat && rd.Messages[0].Type != pb.MsgHeartbeatResp {
+				fmt.Printf("advancec here\n")
+			}
+
 			n.rn.Advance(rd)
 			rd = Ready{}
 			advancec = nil
@@ -420,6 +439,7 @@ func (n *node) Tick() {
 
 func (n *node) Campaign(ctx context.Context) error { return n.step(ctx, pb.Message{Type: pb.MsgHup}) }
 
+// 写入数据
 func (n *node) Propose(ctx context.Context, data []byte) error {
 	return n.stepWait(ctx, pb.Message{Type: pb.MsgProp, Entries: []pb.Entry{{Data: data}}})
 }
@@ -453,14 +473,18 @@ func (n *node) step(ctx context.Context, m pb.Message) error {
 	return n.stepWithWaitOption(ctx, m, false)
 }
 
+// 写入管道再写入数据（异步）：将数据写入node的propc属性
 func (n *node) stepWait(ctx context.Context, m pb.Message) error {
 	return n.stepWithWaitOption(ctx, m, true)
 }
 
 // Step advances the state machine using msgs. The ctx.Err() will be returned,
 // if any.
+// 将数据写入了node对象？
 func (n *node) stepWithWaitOption(ctx context.Context, m pb.Message, wait bool) error {
 	if m.Type != pb.MsgProp {
+		//todo 此处会循环执行，是有心跳？
+		//fmt.Printf("m.Type != pb.MsgProp\n")
 		select {
 		case n.recvc <- m:
 			return nil
@@ -476,7 +500,8 @@ func (n *node) stepWithWaitOption(ctx context.Context, m pb.Message, wait bool) 
 		pm.result = make(chan error, 1)
 	}
 	select {
-	case ch <- pm:
+	case ch <- pm: // 将数据写入n.propc
+		fmt.Printf("role:node,send data to n.proc by wait, node.propc: %+v\n", pm)
 		if !wait {
 			return nil
 		}
@@ -485,7 +510,7 @@ func (n *node) stepWithWaitOption(ctx context.Context, m pb.Message, wait bool) 
 	case <-n.done:
 		return ErrStopped
 	}
-	select {
+	select { // 判断错误
 	case err := <-pm.result:
 		if err != nil {
 			return err
@@ -531,6 +556,7 @@ func (n *node) Status() Status {
 }
 
 func (n *node) ReportUnreachable(id uint64) {
+	fmt.Printf("perr send call here id:%+v\n", id)
 	select {
 	case n.recvc <- pb.Message{Type: pb.MsgUnreachable, From: id}:
 	case <-n.done:
@@ -559,12 +585,19 @@ func (n *node) ReadIndex(ctx context.Context, rctx []byte) error {
 	return n.step(ctx, pb.Message{Type: pb.MsgReadIndex, Entries: []pb.Entry{{Data: rctx}}})
 }
 
+// 此处节点会将数据写入到ready中（curl写入的节点）
 func newReady(r *raft, prevSoftSt *SoftState, prevHardSt pb.HardState) Ready {
 	rd := Ready{
 		Entries:          r.raftLog.unstableEntries(),
 		CommittedEntries: r.raftLog.nextEnts(),
 		Messages:         r.msgs,
 	}
+
+	// 查看MsgProp日志，不是项目代码
+	if len(r.msgs) != 0 && rd.Messages[0].Type != pb.MsgHeartbeat && rd.Messages[0].Type != pb.MsgHeartbeatResp {
+		fmt.Printf("rd:%+v\n", rd)
+	}
+
 	if softSt := r.softState(); !softSt.equal(prevSoftSt) {
 		rd.SoftState = softSt
 	}

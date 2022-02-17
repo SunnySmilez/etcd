@@ -16,6 +16,7 @@ package rafthttp
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"sync"
 	"time"
@@ -147,7 +148,7 @@ func (t *Transport) Start() error {
 
 	// If client didn't provide dial retry frequency, use the default
 	// (100ms backoff between attempts to create a new stream),
-	// so it doesn't bring too much overhead when retry.
+	// so it doesn't bring too much overhead when retry.run
 	if t.DialRetryFrequency == 0 {
 		t.DialRetryFrequency = rate.Every(100 * time.Millisecond)
 	}
@@ -172,8 +173,12 @@ func (t *Transport) Get(id types.ID) Peer {
 	return t.peers[id]
 }
 
+// raft node之间的数据交互
 func (t *Transport) Send(msgs []raftpb.Message) {
 	for _, m := range msgs {
+		if m.Type == raftpb.MsgProp {
+			fmt.Printf("role:transport msg content %+v\n", m)
+		}
 		if m.To == 0 {
 			// ignore intentionally dropped message
 			continue
@@ -189,11 +194,20 @@ func (t *Transport) Send(msgs []raftpb.Message) {
 			if m.Type == raftpb.MsgApp {
 				t.ServerStats.SendAppendReq(m.Size())
 			}
-			p.send(m)
+			if m.Type == raftpb.MsgProp {
+				fmt.Printf("role:transport peer send peer %+v\n", p)
+			}
+
+			p.send(m) // 将数据写入writec
+
 			continue
 		}
 
 		if rok {
+			if m.Type == raftpb.MsgProp {
+				fmt.Printf("role:transport remote send remote %+v\n", g)
+			}
+
 			g.send(m)
 			continue
 		}

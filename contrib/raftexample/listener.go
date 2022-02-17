@@ -16,6 +16,7 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"net"
 	"time"
 )
@@ -48,10 +49,13 @@ func (ln stoppableListener) Accept() (c net.Conn, err error) {
 	}()
 	select {
 	case <-ln.stopc:
+		fmt.Printf("net stop:%+v\n", ln)
 		return nil, errors.New("server stopped")
 	case err := <-errc:
+		fmt.Printf("net error:%+v\n", err)
 		return nil, err
 	case tc := <-connc:
+		//fmt.Printf("net accept tcp:%+v\n", tc)
 		tc.SetKeepAlive(true)
 		tc.SetKeepAlivePeriod(3 * time.Minute)
 		return tc, nil
