@@ -16,12 +16,12 @@ package main
 
 import (
 	"fmt"
+	"go.etcd.io/etcd/raft/v3/raftpb"
+	"go.etcd.io/etcd/v3/contrib/raftexample/debug"
 	"io"
 	"log"
 	"net/http"
 	"strconv"
-
-	"go.etcd.io/etcd/raft/v3/raftpb"
 )
 
 // Handler for a http based key-value store backed by raft
@@ -42,7 +42,9 @@ func (h *httpKVAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		fmt.Printf("method:%+v,key:%+v, v:%+v\n", http.MethodPut, key, string(v))
+		//fmt.Printf("method:%+v,key:%+v, v:%+v\n", http.MethodPut, key, string(v))
+		//fmt.Printf("process:%s, time:%+v, function:%+s, msg:%+v\n", "write msg", time.Now().UnixMicro(), "httpapi.ServeHTTP", key+"-"+string(v))
+		debug.WriteDebugLog("httpapi.ServeHTTP", "write to propc", "", string(v))
 		h.store.Propose(key, string(v))
 
 		// Optimistic-- no waiting for ack from raft. Value is not yet

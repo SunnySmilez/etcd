@@ -17,6 +17,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"go.etcd.io/etcd/v3/contrib/raftexample/debug"
 	"log"
 	"net/http"
 	"net/url"
@@ -463,14 +464,22 @@ func (rc *raftNode) serveChannels() {
 
 		// store raft entries to wal, then publish over commit channel
 		case rd := <-rc.node.Ready(): // node将数据写入到readyc后，这边读取数据
-			if len(rd.Messages) != 0 && rd.Messages[0].Type != raftpb.MsgHeartbeat && rd.Messages[0].Type != raftpb.MsgHeartbeatResp {
-				fmt.Printf("role:raft, after node write data to readyc, read the data\n")
+			//if len(rd.Messages) != 0 && rd.Messages[0].Type != raftpb.MsgHeartbeat && rd.Messages[0].Type != raftpb.MsgHeartbeatResp {
+			if len(rd.Messages) != 0 && rd.Messages[0].Type == raftpb.MsgProp {
+				//fmt.Printf("role:raft, after node write data to readyc, read the data\n")
+				//fmt.Printf("process:%s, time:%+v, function:%+s, read msg from node.readyc:%+v\n", "write msg", time.Now().UnixMicro(), "raft.serveChannels", rd)
+				debug.WriteDebugLog("raft.serveChannels", "read msg from node.readyc", rd.Messages[0].Type, rd.Messages)
 			}
 
 			// 写入wal文件(包含数据和state值)
 			rc.wal.Save(rd.HardState, rd.Entries)
 			// snap不存在，先写入snap
 			if !raft.IsEmptySnap(rd.Snapshot) {
+				//fmt.Printf("process:%s, time:%+v, function:%+s, save Snapshot:%+v\n", "write msg", time.Now().UnixMicro(), "raft.serveChannels", rd)
+				if len(rd.Messages) >= 0 {
+					debug.WriteDebugLog("raft.serveChannels", "save Snapshot", rd.Messages[0].Type, rd.Messages)
+				}
+
 				rc.saveSnap(rd.Snapshot)
 				// 往memoryStoryge写入数据
 				rc.raftStorage.ApplySnapshot(rd.Snapshot)
@@ -481,7 +490,8 @@ func (rc *raftNode) serveChannels() {
 			// 向node发送消息
 			rc.transport.Send(rd.Messages) // 数据写入writec
 			// 将数据写入 raftnode commitC
-			if len(rd.Messages) != 0 && rd.Messages[0].Type != raftpb.MsgHeartbeat && rd.Messages[0].Type != raftpb.MsgHeartbeatResp {
+			//if len(rd.Messages) != 0 && rd.Messages[0].Type != raftpb.MsgHeartbeat && rd.Messages[0].Type != raftpb.MsgHeartbeatResp {
+			if len(rd.Messages) != 0 && rd.Messages[0].Type == raftpb.MsgProp {
 				fmt.Printf("role: raft rd.CommittedEntries:%+v rd.Message:%+v\n", rd.CommittedEntries, rd.Messages)
 			}
 

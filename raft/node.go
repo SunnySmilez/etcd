@@ -18,8 +18,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"go.etcd.io/etcd/raft/v3/debug"
 	pb "go.etcd.io/etcd/raft/v3/raftpb"
-	"time"
 )
 
 type SnapshotStatus int
@@ -329,8 +329,11 @@ func (n *node) run() {
 			// predictably).
 			rd = n.rn.readyWithoutAccept()
 			// 查看MsgProp日志，不是项目代码
-			if len(r.msgs) != 0 && rd.Messages[0].Type != pb.MsgHeartbeat && rd.Messages[0].Type != pb.MsgHeartbeatResp {
+			//if len(r.msgs) != 0 && rd.Messages[0].Type != pb.MsgHeartbeat && rd.Messages[0].Type != pb.MsgHeartbeatResp {
+			if len(r.msgs) != 0 && rd.Messages[0].Type == pb.MsgProp {
 				fmt.Printf("n.readyc:%+v\n", n.readyc)
+				//fmt.Printf("process:%s, time:%+v, function:%+s, write msg to node.readyc:%+v\n", "write msg", time.Now().Unix(), "raft.node.run", &n.readyc)
+				debug.WriteDebugLog("raft.node.run", "write msg to node.readyc", rd.Messages[0].Type, rd.Messages)
 			}
 
 			readyc = n.readyc
@@ -357,7 +360,9 @@ func (n *node) run() {
 		// Currently it is dropped in Step silently.
 		case pm := <-propc:
 			// 消费Propose->stepWait写入的数据
-			fmt.Printf("role:node, deal n.propc data who is send by step/stepWait, time:%+v\n", time.Now())
+			//fmt.Printf("role:node, deal n.propc data who is send by step/stepWait, time:%+v\n", time.Now())
+			//fmt.Printf("process:%s, time:%+v, function:%+s, msg:%+v\n", "write msg", time.Now().Unix(), "raft.node.run", "read msg from propc")
+			debug.WriteDebugLog("raft.node.run", "read msg from propc", pm.m.Type, pm.m)
 			m := pm.m
 			m.From = r.id
 			err := r.Step(m)
@@ -404,13 +409,15 @@ func (n *node) run() {
 		case <-n.tickc:
 			n.rn.Tick()
 		case readyc <- rd: // 写入数据到readyc
-			if len(r.msgs) != 0 && rd.Messages[0].Type != pb.MsgHeartbeat && rd.Messages[0].Type != pb.MsgHeartbeatResp {
+			//if len(r.msgs) != 0 && rd.Messages[0].Type != pb.MsgHeartbeat && rd.Messages[0].Type != pb.MsgHeartbeatResp {
+			if len(r.msgs) != 0 && rd.Messages[0].Type == pb.MsgProp {
 				fmt.Printf("role:node, write data to readyc\n")
 			}
 			n.rn.acceptReady(rd)  // 将数据删除
 			advancec = n.advancec // advances写入数据
 		case <-advancec:
-			if len(r.msgs) != 0 && rd.Messages[0].Type != pb.MsgHeartbeat && rd.Messages[0].Type != pb.MsgHeartbeatResp {
+			//if len(r.msgs) != 0 && rd.Messages[0].Type != pb.MsgHeartbeat && rd.Messages[0].Type != pb.MsgHeartbeatResp {
+			if len(r.msgs) != 0 && rd.Messages[0].Type == pb.MsgProp {
 				fmt.Printf("advancec here\n")
 			}
 
@@ -441,6 +448,8 @@ func (n *node) Campaign(ctx context.Context) error { return n.step(ctx, pb.Messa
 
 // 写入数据
 func (n *node) Propose(ctx context.Context, data []byte) error {
+	//fmt.Printf("process:%s, time:%+v, function:%+s, msg:%+v\n", "write msg", time.Now().Unix(), "raft.node.Propose", string(data))
+	debug.WriteDebugLog("raft.node.Propose", "", "", string(data))
 	return n.stepWait(ctx, pb.Message{Type: pb.MsgProp, Entries: []pb.Entry{{Data: data}}})
 }
 
@@ -475,6 +484,8 @@ func (n *node) step(ctx context.Context, m pb.Message) error {
 
 // 写入管道再写入数据（异步）：将数据写入node的propc属性
 func (n *node) stepWait(ctx context.Context, m pb.Message) error {
+	//fmt.Printf("process:%s, time:%+v, function:%+s, msg:%+v\n", "write msg", time.Now().Unix(), "raft.node.stepWait", m)
+	debug.WriteDebugLog("raft.node.stepWait", "", m.Type, m)
 	return n.stepWithWaitOption(ctx, m, true)
 }
 
@@ -501,7 +512,9 @@ func (n *node) stepWithWaitOption(ctx context.Context, m pb.Message, wait bool) 
 	}
 	select {
 	case ch <- pm: // 将数据写入n.propc
-		fmt.Printf("role:node,send data to n.proc by wait, node.propc: %+v\n", pm)
+		//fmt.Printf("process:%s, time:%+v, function:%+s, msg:%+v\n", "write msg", time.Now().Unix(), "raft.node.stepWithWaitOption", "write to node.propc")
+		debug.WriteDebugLog("raft.node.stepWithWaitOption", "write to node.propc", m.Type, m)
+		//fmt.Printf("role:node,send data to n.proc by wait, node.propc: %+v\n", pm)
 		if !wait {
 			return nil
 		}
@@ -594,7 +607,8 @@ func newReady(r *raft, prevSoftSt *SoftState, prevHardSt pb.HardState) Ready {
 	}
 
 	// 查看MsgProp日志，不是项目代码
-	if len(r.msgs) != 0 && rd.Messages[0].Type != pb.MsgHeartbeat && rd.Messages[0].Type != pb.MsgHeartbeatResp {
+	//if len(r.msgs) != 0 && rd.Messages[0].Type != pb.MsgHeartbeat && rd.Messages[0].Type != pb.MsgHeartbeatResp {
+	if len(r.msgs) != 0 && rd.Messages[0].Type == pb.MsgProp {
 		fmt.Printf("rd:%+v\n", rd)
 	}
 

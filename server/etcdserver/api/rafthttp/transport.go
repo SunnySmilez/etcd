@@ -17,6 +17,7 @@ package rafthttp
 import (
 	"context"
 	"fmt"
+	"go.etcd.io/etcd/v3/contrib/raftexample/debug"
 	"net/http"
 	"sync"
 	"time"
@@ -178,7 +179,10 @@ func (t *Transport) Send(msgs []raftpb.Message) {
 	for _, m := range msgs {
 		if m.Type == raftpb.MsgProp {
 			fmt.Printf("role:transport msg content %+v\n", m)
+			//fmt.Printf("process:%s, time:%+v, function:%+s, send to node:%+v\n", "write msg", time.Now().Unix(), "server.etcdserver.api.rafthttp.transport.send", m)
+			debug.WriteDebugLog("server.etcdserver.api.rafthttp.transport.send", "send to node", m.Type, m)
 		}
+
 		if m.To == 0 {
 			// ignore intentionally dropped message
 			continue
@@ -194,7 +198,10 @@ func (t *Transport) Send(msgs []raftpb.Message) {
 			if m.Type == raftpb.MsgApp {
 				t.ServerStats.SendAppendReq(m.Size())
 			}
+
 			if m.Type == raftpb.MsgProp {
+				debug.WriteDebugLog("server.etcdserver.api.rafthttp.transport.send", "call peer.send", m.Type, m)
+				//fmt.Printf("process:%s, time:%+v, function:%+s, call peer.send:%+v\n", "write msg", time.Now().Unix(), "server.etcdserver.api.rafthttp.transport.send", m)
 				fmt.Printf("role:transport peer send peer %+v\n", p)
 			}
 

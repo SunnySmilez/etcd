@@ -17,6 +17,7 @@ package rafthttp
 import (
 	"context"
 	"fmt"
+	"go.etcd.io/etcd/v3/contrib/raftexample/debug"
 	"sync"
 	"time"
 
@@ -247,8 +248,11 @@ func (p *peer) send(m raftpb.Message) {
 	writec, name := p.pick(m)
 	select {
 	case writec <- m:
-		if m.Type != raftpb.MsgHeartbeat && m.Type != raftpb.MsgHeartbeatResp {
+		//if m.Type != raftpb.MsgHeartbeat && m.Type != raftpb.MsgHeartbeatResp {
+		if m.Type == raftpb.MsgProp {
 			fmt.Printf("role:peer writec here m %+v\n", m)
+			//fmt.Printf("process:%s, time:%+v, function:%+s, write to writec:%+v\n", "write msg", time.Now().UnixMicro(), "server.etcdserver.api.rafthttp.peer.send", m)
+			debug.WriteDebugLog("server.etcdserver.api.rafthttp.peer.send", "write to writec", m.Type, m)
 		}
 	default:
 		fmt.Printf("role:peer here m %+v\n", m)

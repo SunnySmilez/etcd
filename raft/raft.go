@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"go.etcd.io/etcd/v3/contrib/raftexample/debug"
 	"math"
 	"math/rand"
 	"sort"
@@ -385,6 +386,11 @@ func (r *raft) hardState() pb.HardState {
 // sending the message (as part of next Ready message processing).
 // 当Type=MsgProp，将数据写入msgs
 func (r *raft) send(m pb.Message) {
+	if m.Type == pb.MsgProp {
+		//fmt.Printf("process:%s, time:%+v, function:%+s, msg:%+v\n", "write msg", time.Now().Unix(), "raft.raft.send", "append msg to raft.msgs")
+		debug.WriteDebugLog("raft.raft.send", "append msg to raft.msgs", m.Type, m)
+	}
+
 	if m.From == None {
 		m.From = r.id
 	}
@@ -433,7 +439,7 @@ func (r *raft) sendAppend(to uint64) { // 数据发送给别的节点
 // 往flower同步数据
 func (r *raft) maybeSendAppend(to uint64, sendIfEmpty bool) bool {
 	pr := r.prs.Progress[to]
-	fmt.Printf("role:raft,method:maybeSendAppend pr:%+v\n", pr)
+	//fmt.Printf("role:raft,method:maybeSendAppend pr:%+v\n", pr)
 	if pr.IsPaused() { // 判断接收节点状态
 		return false
 	}
@@ -491,6 +497,11 @@ func (r *raft) maybeSendAppend(to uint64, sendIfEmpty bool) bool {
 			}
 		}
 	}
+
+	if m.Type == pb.MsgProp {
+		fmt.Printf("process:%s, time:%+v, function:%+s, msg: leader del msg,msg:%+v\n", "write msg", time.Now().Unix(), "raft.raft.maybeSendAppend", m)
+	}
+
 	fmt.Printf("leader send msg:%+v\n", m)
 	r.send(m)
 	return true
@@ -518,6 +529,8 @@ func (r *raft) sendHeartbeat(to uint64, ctx []byte) {
 // bcastAppend sends RPC, with entries to all peers that are not up-to-date
 // according to the progress recorded in r.prs.
 func (r *raft) bcastAppend() {
+	//fmt.Printf("process:%s, time:%+v, function:%+s, msg:%+v\n", "write msg", time.Now().Unix(), "raft.raft.bcastAppend", "leader deal msg")
+	debug.WriteDebugLog("raft.raft.bcastAppend", "leader deal msg", "", "")
 	r.prs.Visit(func(id uint64, _ *tracker.Progress) {
 		if id == r.id {
 			return
@@ -625,7 +638,7 @@ func (r *raft) reset(term uint64) {
 
 // 数据写入到raftlog，同时对flower做回应，处理提交对index（leader调用该函数）
 func (r *raft) appendEntry(es ...pb.Entry) (accepted bool) {
-	fmt.Printf("role:raft-leader,method:appendEntry, es:%+v", es)
+	fmt.Printf("role:raft-leader,method:appendEntry, es:%+v\n", es)
 	li := r.raftLog.lastIndex() // 获取raftlog的最后的key
 	for i := range es {
 		es[i].Term = r.Term
@@ -1032,7 +1045,9 @@ func stepLeader(r *raft, m pb.Message) error {
 		})
 		return nil
 	case pb.MsgProp:
-		fmt.Printf("role:raft-leader, raft:%+v\n message:%+v\n", r, m)
+		//fmt.Printf("process:%s, time:%+v, function:%+s, msg:%+v\n", "write msg", time.Now().Unix(), "raft.raft.stepLeader", "leader deal msg")
+		debug.WriteDebugLog("raft.raft.stepLeader", "leader deal msg", m.Type, m)
+		//fmt.Printf("role:raft-leader, raft:%+v\n message:%+v\n", r, m)
 		if len(m.Entries) == 0 {
 			r.logger.Panicf("%x stepped empty MsgProp", r.id)
 		}
@@ -1442,6 +1457,8 @@ func stepFollower(r *raft, m pb.Message) error {
 	switch m.Type {
 	case pb.MsgProp:
 		fmt.Printf("role:raft, raft:%+v\n message:%+v\n", r, m)
+		//fmt.Printf("process:%s, time:%+v, function:%+s, follower deal msg:%+v\n", "write msg", time.Now().Unix(), "raft.raft.stepFollower", m)
+		debug.WriteDebugLog("raft.raft.stepFollower", "follower deal msg", m.Type, m)
 		if r.lead == None { // 判断是否存在leader节点
 			r.logger.Infof("%x no leader at term %d; dropping proposal", r.id, r.Term)
 			return ErrProposalDropped

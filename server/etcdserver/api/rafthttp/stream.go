@@ -17,6 +17,7 @@ package rafthttp
 import (
 	"context"
 	"fmt"
+	"go.etcd.io/etcd/v3/contrib/raftexample/debug"
 	"io"
 	"net/http"
 	"path"
@@ -203,6 +204,8 @@ func (cw *streamWriter) run() {
 		case m := <-msgc: // 读取send写入msgc的数据
 			if m.Type == raftpb.MsgProp {
 				fmt.Printf("send msg to encode m:%+v\n", m)
+				//fmt.Printf("process:%s, time:%+v, function:%+s, read msg from stream.msgc:%+v\n", "write msg", time.Now().Unix(), "server.etcdserver.api.rafthttp.stream.(streamWriter)Run()", m)
+				debug.WriteDebugLog("server.etcdserver.api.rafthttp.stream.(streamWriter)Run()", "read msg from stream.msgc", m.Type, m)
 			}
 
 			err := enc.encode(&m) // 消息进行编码并写入连接缓冲区
@@ -210,6 +213,10 @@ func (cw *streamWriter) run() {
 				unflushed += m.Size()
 
 				if len(msgc) == 0 || batched > streamBufSize/2 {
+					if m.Type == raftpb.MsgProp {
+						//fmt.Printf("process:%s, time:%+v, function:%+s, flush data from cache:%+v\n", "write msg", time.Now().Unix(), "server.etcdserver.api.rafthttp.stream.(streamWriter)Run()", m)
+						debug.WriteDebugLog("server.etcdserver.api.rafthttp.stream.(streamWriter)Run()", "flush data from cache", m.Type, m)
+					}
 					flusher.Flush() // 将数据刷入到对端
 					sentBytes.WithLabelValues(cw.peerID.String()).Add(float64(unflushed))
 					unflushed = 0
@@ -475,8 +482,10 @@ func (cr *streamReader) decodeLoop(rc io.ReadCloser, t streamType) error {
 	cr.mu.Lock()
 	switch t { // 根据信息类型，实例化decode对象
 	case streamTypeMsgAppV2:
+		fmt.Printf("time:%+v, function:%+s, msg:%+v\n", time.Now().Unix(), "stream.decodeLoop", "read msg from recvc/propc,type:streamTypeMsgAppV2")
 		dec = newMsgAppV2Decoder(rc, cr.tr.ID, cr.peerID)
 	case streamTypeMessage:
+		fmt.Printf("time:%+v, function:%+s, msg:%+v\n", time.Now().Unix(), "stream.decodeLoop", "read msg from recvc/propc,type:streamTypeMessage")
 		dec = &messageDecoder{r: rc}
 	default:
 		if cr.lg != nil {

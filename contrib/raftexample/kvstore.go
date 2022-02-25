@@ -19,11 +19,11 @@ import (
 	"encoding/gob"
 	"encoding/json"
 	"fmt"
-	"log"
-	"sync"
-
 	"go.etcd.io/etcd/raft/v3/raftpb"
 	"go.etcd.io/etcd/server/v3/etcdserver/api/snap"
+	"go.etcd.io/etcd/v3/contrib/raftexample/debug"
+	"log"
+	"sync"
 )
 
 // a key-value store backed by raft
@@ -71,7 +71,9 @@ func (s *kvstore) Propose(k string, v string) {
 	if err := gob.NewEncoder(&buf).Encode(kv{k, v}); err != nil {
 		log.Fatal(err)
 	}
-	fmt.Printf("role:app-kvstore, set data to proposeC:%+v\n", buf.String())
+	//fmt.Printf("role:app-kvstore, set data to proposeC:%+v\n", buf.String())
+	//fmt.Printf("process:%s, time:%+v, function:%+s, msg:%+v\n", "write msg", time.Now().UnixMicro(), "kvstore.Propose", buf.String())
+	debug.WriteDebugLog("kvstore.Propose", "write to proposeC", "", buf.String())
 	s.proposeC <- buf.String()
 }
 
