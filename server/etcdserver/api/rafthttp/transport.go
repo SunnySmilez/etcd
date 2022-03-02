@@ -180,8 +180,9 @@ func (t *Transport) Send(msgs []raftpb.Message) {
 		if m.Type == raftpb.MsgProp {
 			fmt.Printf("role:transport msg content %+v\n", m)
 			//fmt.Printf("process:%s, time:%+v, function:%+s, send to node:%+v\n", "write msg", time.Now().Unix(), "server.etcdserver.api.rafthttp.transport.send", m)
-			debug.WriteDebugLog("server.etcdserver.api.rafthttp.transport.send", "send to node", m.Type, m)
 		}
+
+		debug.WriteLog("server.etcdserver.api.rafthttp.transport.send", "send to node", []raftpb.Message{m})
 
 		if m.To == 0 {
 			// ignore intentionally dropped message
@@ -200,10 +201,11 @@ func (t *Transport) Send(msgs []raftpb.Message) {
 			}
 
 			if m.Type == raftpb.MsgProp {
-				debug.WriteDebugLog("server.etcdserver.api.rafthttp.transport.send", "call peer.send", m.Type, m)
 				//fmt.Printf("process:%s, time:%+v, function:%+s, call peer.send:%+v\n", "write msg", time.Now().Unix(), "server.etcdserver.api.rafthttp.transport.send", m)
 				fmt.Printf("role:transport peer send peer %+v\n", p)
 			}
+
+			debug.WriteLog("server.etcdserver.api.rafthttp.transport.send", "call peer.send", []raftpb.Message{m})
 
 			p.send(m) // 将数据写入writec
 

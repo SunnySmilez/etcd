@@ -44,7 +44,7 @@ func (h *httpKVAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 		//fmt.Printf("method:%+v,key:%+v, v:%+v\n", http.MethodPut, key, string(v))
 		//fmt.Printf("process:%s, time:%+v, function:%+s, msg:%+v\n", "write msg", time.Now().UnixMicro(), "httpapi.ServeHTTP", key+"-"+string(v))
-		debug.WriteDebugLog("httpapi.ServeHTTP", "write to propc", "", string(v))
+		debug.WriteLog("httpapi.ServeHTTP", "write to propc"+string(v), []raftpb.Message{})
 		h.store.Propose(key, string(v))
 
 		// Optimistic-- no waiting for ack from raft. Value is not yet

@@ -388,7 +388,7 @@ func (r *raft) hardState() pb.HardState {
 func (r *raft) send(m pb.Message) {
 	if m.Type == pb.MsgProp {
 		//fmt.Printf("process:%s, time:%+v, function:%+s, msg:%+v\n", "write msg", time.Now().Unix(), "raft.raft.send", "append msg to raft.msgs")
-		debug.WriteDebugLog("raft.raft.send", "append msg to raft.msgs", m.Type, m)
+		debug.WriteLog("raft.raft.send", "append msg to raft.msgs", []pb.Message{m})
 	}
 
 	if m.From == None {
@@ -498,9 +498,11 @@ func (r *raft) maybeSendAppend(to uint64, sendIfEmpty bool) bool {
 		}
 	}
 
-	if m.Type == pb.MsgProp {
+	/*if m.Type == pb.MsgProp {
 		fmt.Printf("process:%s, time:%+v, function:%+s, msg: leader del msg,msg:%+v\n", "write msg", time.Now().Unix(), "raft.raft.maybeSendAppend", m)
-	}
+	}*/
+
+	debug.WriteLog("raft.raft.maybeSendAppend", "leader deal msg", []pb.Message{m})
 
 	fmt.Printf("leader send msg:%+v\n", m)
 	r.send(m)
@@ -530,7 +532,7 @@ func (r *raft) sendHeartbeat(to uint64, ctx []byte) {
 // according to the progress recorded in r.prs.
 func (r *raft) bcastAppend() {
 	//fmt.Printf("process:%s, time:%+v, function:%+s, msg:%+v\n", "write msg", time.Now().Unix(), "raft.raft.bcastAppend", "leader deal msg")
-	debug.WriteDebugLog("raft.raft.bcastAppend", "leader deal msg", "", "")
+	debug.WriteLog("raft.raft.bcastAppend", "leader deal msg", []pb.Message{})
 	r.prs.Visit(func(id uint64, _ *tracker.Progress) {
 		if id == r.id {
 			return
@@ -1046,7 +1048,7 @@ func stepLeader(r *raft, m pb.Message) error {
 		return nil
 	case pb.MsgProp:
 		//fmt.Printf("process:%s, time:%+v, function:%+s, msg:%+v\n", "write msg", time.Now().Unix(), "raft.raft.stepLeader", "leader deal msg")
-		debug.WriteDebugLog("raft.raft.stepLeader", "leader deal msg", m.Type, m)
+		debug.WriteLog("raft.raft.stepLeader", "leader deal msg", []pb.Message{m})
 		//fmt.Printf("role:raft-leader, raft:%+v\n message:%+v\n", r, m)
 		if len(m.Entries) == 0 {
 			r.logger.Panicf("%x stepped empty MsgProp", r.id)
@@ -1458,7 +1460,8 @@ func stepFollower(r *raft, m pb.Message) error {
 	case pb.MsgProp:
 		fmt.Printf("role:raft, raft:%+v\n message:%+v\n", r, m)
 		//fmt.Printf("process:%s, time:%+v, function:%+s, follower deal msg:%+v\n", "write msg", time.Now().Unix(), "raft.raft.stepFollower", m)
-		debug.WriteDebugLog("raft.raft.stepFollower", "follower deal msg", m.Type, m)
+		ms := []pb.Message{}
+		debug.WriteLog("raft.raft.stepFollower", "follower deal msg", append(ms, m))
 		if r.lead == None { // 判断是否存在leader节点
 			r.logger.Infof("%x no leader at term %d; dropping proposal", r.id, r.Term)
 			return ErrProposalDropped

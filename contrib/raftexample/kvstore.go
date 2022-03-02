@@ -73,7 +73,8 @@ func (s *kvstore) Propose(k string, v string) {
 	}
 	//fmt.Printf("role:app-kvstore, set data to proposeC:%+v\n", buf.String())
 	//fmt.Printf("process:%s, time:%+v, function:%+s, msg:%+v\n", "write msg", time.Now().UnixMicro(), "kvstore.Propose", buf.String())
-	debug.WriteDebugLog("kvstore.Propose", "write to proposeC", "", buf.String())
+	//debug.WriteDebugLog("kvstore.Propose", "write to proposeC", "", buf.String())
+	debug.WriteLog("kvstore.Propose", "write to proposeC", []raftpb.Message{})
 	s.proposeC <- buf.String()
 }
 

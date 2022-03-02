@@ -252,7 +252,7 @@ func (p *peer) send(m raftpb.Message) {
 		if m.Type == raftpb.MsgProp {
 			fmt.Printf("role:peer writec here m %+v\n", m)
 			//fmt.Printf("process:%s, time:%+v, function:%+s, write to writec:%+v\n", "write msg", time.Now().UnixMicro(), "server.etcdserver.api.rafthttp.peer.send", m)
-			debug.WriteDebugLog("server.etcdserver.api.rafthttp.peer.send", "write to writec", m.Type, m)
+			debug.WriteLog("server.etcdserver.api.rafthttp.peer.send", "write to writec", []raftpb.Message{m})
 		}
 	default:
 		fmt.Printf("role:peer here m %+v\n", m)

@@ -18,7 +18,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"go.etcd.io/etcd/v3/contrib/raftexample/debug"
+	debug2 "go.etcd.io/etcd/raft/v3/debug"
 	"hash/crc32"
 	"io"
 	"os"
@@ -934,7 +934,7 @@ func (w *WAL) Save(st raftpb.HardState, ents []raftpb.Entry) error {
 	// TODO(xiangli): no more reference operator
 	fmt.Printf("role:wal ents:%+v， st：%+v, mustSync:%+v\n", ents, st, mustSync)
 	//fmt.Printf("process:%s, time:%+v, function:%+s, save wal:%+v\n", "write msg", time.Now().Unix(), "server.storage.wal.wal.save", ents)
-	debug.WriteDebugLog("server.storage.wal.wal.save", "save wal", "", ents)
+	debug2.NewRaftDebug().WriteLog("server.storage.wal.wal.save", "save wal", ents)
 	for i := range ents {
 		if err := w.saveEntry(&ents[i]); err != nil { // 存储数据
 			return err

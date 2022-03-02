@@ -202,21 +202,21 @@ func (cw *streamWriter) run() {
 			heartbeatc, msgc = nil, nil
 
 		case m := <-msgc: // 读取send写入msgc的数据
-			if m.Type == raftpb.MsgProp {
-				fmt.Printf("send msg to encode m:%+v\n", m)
-				//fmt.Printf("process:%s, time:%+v, function:%+s, read msg from stream.msgc:%+v\n", "write msg", time.Now().Unix(), "server.etcdserver.api.rafthttp.stream.(streamWriter)Run()", m)
-				debug.WriteDebugLog("server.etcdserver.api.rafthttp.stream.(streamWriter)Run()", "read msg from stream.msgc", m.Type, m)
-			}
+			//if m.Type == raftpb.MsgProp {
+			//fmt.Printf("send msg to encode m:%+v\n", m)
+			//fmt.Printf("process:%s, time:%+v, function:%+s, read msg from stream.msgc:%+v\n", "write msg", time.Now().Unix(), "server.etcdserver.api.rafthttp.stream.(streamWriter)Run()", m)
+			debug.WriteLog("server.etcdserver.api.rafthttp.stream.(streamWriter)Run()", "read msg from stream.msgc", []raftpb.Message{m})
+			//}
 
 			err := enc.encode(&m) // 消息进行编码并写入连接缓冲区
 			if err == nil {
 				unflushed += m.Size()
 
 				if len(msgc) == 0 || batched > streamBufSize/2 {
-					if m.Type == raftpb.MsgProp {
-						//fmt.Printf("process:%s, time:%+v, function:%+s, flush data from cache:%+v\n", "write msg", time.Now().Unix(), "server.etcdserver.api.rafthttp.stream.(streamWriter)Run()", m)
-						debug.WriteDebugLog("server.etcdserver.api.rafthttp.stream.(streamWriter)Run()", "flush data from cache", m.Type, m)
-					}
+					//if m.Type == raftpb.MsgProp {
+					//fmt.Printf("process:%s, time:%+v, function:%+s, flush data from cache:%+v\n", "write msg", time.Now().Unix(), "server.etcdserver.api.rafthttp.stream.(streamWriter)Run()", m)
+					//}
+					debug.WriteLog("server.etcdserver.api.rafthttp.stream.(streamWriter)Run()", "flush data from cache", []raftpb.Message{m})
 					flusher.Flush() // 将数据刷入到对端
 					sentBytes.WithLabelValues(cw.peerID.String()).Add(float64(unflushed))
 					unflushed = 0

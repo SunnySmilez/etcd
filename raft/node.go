@@ -333,7 +333,7 @@ func (n *node) run() {
 			if len(r.msgs) != 0 && rd.Messages[0].Type == pb.MsgProp {
 				fmt.Printf("n.readyc:%+v\n", n.readyc)
 				//fmt.Printf("process:%s, time:%+v, function:%+s, write msg to node.readyc:%+v\n", "write msg", time.Now().Unix(), "raft.node.run", &n.readyc)
-				debug.WriteDebugLog("raft.node.run", "write msg to node.readyc", rd.Messages[0].Type, rd.Messages)
+				debug.WriteLog("raft.node.run", "write msg to node.readyc", rd.Messages)
 			}
 
 			readyc = n.readyc
@@ -362,7 +362,7 @@ func (n *node) run() {
 			// 消费Propose->stepWait写入的数据
 			//fmt.Printf("role:node, deal n.propc data who is send by step/stepWait, time:%+v\n", time.Now())
 			//fmt.Printf("process:%s, time:%+v, function:%+s, msg:%+v\n", "write msg", time.Now().Unix(), "raft.node.run", "read msg from propc")
-			debug.WriteDebugLog("raft.node.run", "read msg from propc", pm.m.Type, pm.m)
+			debug.WriteLog("raft.node.run", "read msg from propc", []pb.Message{pm.m})
 			m := pm.m
 			m.From = r.id
 			err := r.Step(m)
@@ -449,7 +449,13 @@ func (n *node) Campaign(ctx context.Context) error { return n.step(ctx, pb.Messa
 // 写入数据
 func (n *node) Propose(ctx context.Context, data []byte) error {
 	//fmt.Printf("process:%s, time:%+v, function:%+s, msg:%+v\n", "write msg", time.Now().Unix(), "raft.node.Propose", string(data))
-	debug.WriteDebugLog("raft.node.Propose", "", "", string(data))
+	// for debug
+	ms := []pb.Message{
+		{Type: pb.MsgProp, Entries: []pb.Entry{{Data: data}}},
+	}
+
+	debug.WriteLog("raft.node.Propose", "", ms)
+
 	return n.stepWait(ctx, pb.Message{Type: pb.MsgProp, Entries: []pb.Entry{{Data: data}}})
 }
 
@@ -485,7 +491,7 @@ func (n *node) step(ctx context.Context, m pb.Message) error {
 // 写入管道再写入数据（异步）：将数据写入node的propc属性
 func (n *node) stepWait(ctx context.Context, m pb.Message) error {
 	//fmt.Printf("process:%s, time:%+v, function:%+s, msg:%+v\n", "write msg", time.Now().Unix(), "raft.node.stepWait", m)
-	debug.WriteDebugLog("raft.node.stepWait", "", m.Type, m)
+	debug.WriteLog("raft.node.stepWait", "", []pb.Message{m})
 	return n.stepWithWaitOption(ctx, m, true)
 }
 
@@ -513,7 +519,7 @@ func (n *node) stepWithWaitOption(ctx context.Context, m pb.Message, wait bool) 
 	select {
 	case ch <- pm: // 将数据写入n.propc
 		//fmt.Printf("process:%s, time:%+v, function:%+s, msg:%+v\n", "write msg", time.Now().Unix(), "raft.node.stepWithWaitOption", "write to node.propc")
-		debug.WriteDebugLog("raft.node.stepWithWaitOption", "write to node.propc", m.Type, m)
+		debug.WriteLog("raft.node.stepWithWaitOption", "write to node.propc", []pb.Message{m})
 		//fmt.Printf("role:node,send data to n.proc by wait, node.propc: %+v\n", pm)
 		if !wait {
 			return nil
