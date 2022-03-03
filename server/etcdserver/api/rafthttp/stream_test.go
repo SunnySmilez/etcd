@@ -18,9 +18,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/prometheus/client_golang/prometheus"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"path"
 	"reflect"
 	"sync"
 	"testing"
@@ -453,4 +455,28 @@ func (h *fakeStreamHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		Closer:  c,
 	})
 	<-c.closeNotify()
+}
+
+func TestJoin(t *testing.T) {
+	fmt.Print(path.Join("/aaa", "aa"))
+}
+
+func TestWithLabelValues(t *testing.T) {
+	sentBytes = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: "etcd",
+		Subsystem: "network",
+		Name:      "peer_sent_bytes_total",
+		Help:      "The total number of bytes sent to peers.",
+	},
+		[]string{"To"},
+	)
+	id := types.ID(10)
+	//var n float64
+	//n = 1
+	c := sentBytes.WithLabelValues(id.String())
+	fmt.Printf("%+v\n", c)
+	c.Add(float64(1))
+	fmt.Printf("%+v\n", c)
+	d, err := sentBytes.GetMetricWithLabelValues(id.String())
+	fmt.Printf("%+v,%+v\n", d, err)
 }

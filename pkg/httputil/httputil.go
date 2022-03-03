@@ -25,7 +25,8 @@ import (
 	"net/http"
 )
 
-// GracefulClose drains http.Response.Body until it hits EOF
+// 平滑关闭
+//GracefulClose drains http.Response.Body until it hits EOF
 // and closes it. This prevents TCP/TLS connections from closing,
 // therefore available for reuse.
 // Borrowed from golang/net/context/ctxhttp/cancelreq.go.

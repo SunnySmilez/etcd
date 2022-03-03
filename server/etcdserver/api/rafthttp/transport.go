@@ -17,7 +17,7 @@ package rafthttp
 import (
 	"context"
 	"fmt"
-	"go.etcd.io/etcd/v3/contrib/raftexample/debug"
+	"go.etcd.io/etcd/raft/v3/debug"
 	"net/http"
 	"sync"
 	"time"

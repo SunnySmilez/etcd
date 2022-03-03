@@ -17,6 +17,7 @@ package rafthttp
 import (
 	"bytes"
 	"encoding/binary"
+	"fmt"
 	"io"
 	"net/http"
 	"reflect"
@@ -218,4 +219,9 @@ func readEntryFrom(r io.Reader, ent *raftpb.Entry) error {
 		return err
 	}
 	return ent.Unmarshal(buf)
+}
+
+func TestSemver(t *testing.T) {
+	//semver.New("2.0.0")
+	fmt.Printf("%+v", semver.Must(semver.NewVersion("2.0.0")))
 }

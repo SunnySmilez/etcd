@@ -216,7 +216,7 @@ func (rn *RawNode) WithProgress(visitor func(id uint64, typ ProgressType, pr tra
 }
 
 // ReportUnreachable reports the given node is not reachable for the last send.
-func (rn *RawNode) ReportUnreachable(id uint64) {
+func (rn *RawNode) ReportUnreachable(id uint64) { // 记录消息没接收到
 	_ = rn.raft.Step(pb.Message{Type: pb.MsgUnreachable, From: id})
 }
 

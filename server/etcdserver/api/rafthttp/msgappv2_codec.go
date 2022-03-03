@@ -89,7 +89,7 @@ func (enc *msgAppV2Encoder) encode(m *raftpb.Message) error {
 
 	start := time.Now()
 	switch {
-	case isLinkHeartbeatMessage(m):
+	case isLinkHeartbeatMessage(m): // 心跳消息
 		enc.uint8buf[0] = msgTypeLinkHeartbeat
 		if _, err := enc.w.Write(enc.uint8buf); err != nil {
 			return err

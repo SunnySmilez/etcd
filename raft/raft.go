@@ -18,7 +18,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"go.etcd.io/etcd/v3/contrib/raftexample/debug"
+	"go.etcd.io/etcd/raft/v3/debug"
 	"math"
 	"math/rand"
 	"sort"

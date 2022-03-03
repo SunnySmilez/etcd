@@ -17,7 +17,7 @@ package rafthttp
 import (
 	"context"
 	"fmt"
-	"go.etcd.io/etcd/v3/contrib/raftexample/debug"
+	"go.etcd.io/etcd/raft/v3/debug"
 	"io"
 	"net/http"
 	"path"
@@ -37,6 +37,7 @@ import (
 	"golang.org/x/time/rate"
 )
 
+// 支持两种消息版本
 const (
 	streamTypeMessage  streamType = "message"
 	streamTypeMsgAppV2 streamType = "msgappv2"
@@ -44,6 +45,7 @@ const (
 	streamBufSize = 4096
 )
 
+// 定义版本支持的消息类型
 var (
 	errUnsupportedStreamType = fmt.Errorf("unsupported stream type")
 
@@ -65,6 +67,7 @@ var (
 
 type streamType string
 
+// 不同类型定义不同路径
 func (t streamType) endpoint(lg *zap.Logger) string {
 	switch t {
 	case streamTypeMsgAppV2:
@@ -79,6 +82,7 @@ func (t streamType) endpoint(lg *zap.Logger) string {
 	}
 }
 
+// 消息类型返回string
 func (t streamType) String() string {
 	switch t {
 	case streamTypeMsgAppV2:
@@ -97,43 +101,46 @@ var (
 	linkHeartbeatMessage = raftpb.Message{Type: raftpb.MsgHeartbeat}
 )
 
+// 判断是否是心跳消息类型
 func isLinkHeartbeatMessage(m *raftpb.Message) bool {
 	return m.Type == raftpb.MsgHeartbeat && m.From == 0 && m.To == 0
 }
 
+// 对外的所有连接
 type outgoingConn struct {
-	t streamType
+	t streamType // 消息类型，根据不同的类型做不同的事情
 	io.Writer
-	http.Flusher
+	http.Flusher //http flush
 	io.Closer
 
 	localID types.ID
-	peerID  types.ID
+	peerID  types.ID // 集群内id
 }
 
 // streamWriter writes messages to the attached outgoingConn.
 type streamWriter struct {
-	lg *zap.Logger
+	lg *zap.Logger //日志组件
 
 	localID types.ID
 	peerID  types.ID
 
 	status *peerStatus
-	fs     *stats.FollowerStats
-	r      Raft
+	fs     *stats.FollowerStats // raft follower节点的各种统计信息
+	r      Raft                 //raft实例
 
 	mu      sync.Mutex // guard field working and closer
 	closer  io.Closer
 	working bool
 
-	msgc  chan raftpb.Message
-	connc chan *outgoingConn
+	msgc  chan raftpb.Message //写入的msg信息
+	connc chan *outgoingConn  // 连接的信息
 	stopc chan struct{}
 	done  chan struct{}
 }
 
 // startStreamWriter creates a streamWrite and starts a long running go-routine that accepts
 // messages and writes to the attached outgoing connection.
+// 实例化接口
 func startStreamWriter(lg *zap.Logger, local, id types.ID, status *peerStatus, fs *stats.FollowerStats, r Raft) *streamWriter {
 	w := &streamWriter{
 		lg: lg,
@@ -153,6 +160,7 @@ func startStreamWriter(lg *zap.Logger, local, id types.ID, status *peerStatus, f
 	return w
 }
 
+// 初始化
 func (cw *streamWriter) run() {
 	var (
 		msgc       chan raftpb.Message
@@ -176,13 +184,13 @@ func (cw *streamWriter) run() {
 
 	for {
 		select {
-		case <-heartbeatc:
-			err := enc.encode(&linkHeartbeatMessage)
+		case <-heartbeatc: //处理心跳（处理各种统计数目）
+			err := enc.encode(&linkHeartbeatMessage) //编码
 			unflushed += linkHeartbeatMessage.Size()
 			if err == nil {
-				flusher.Flush()
+				flusher.Flush() //刷数据
 				batched = 0
-				sentBytes.WithLabelValues(cw.peerID.String()).Add(float64(unflushed))
+				sentBytes.WithLabelValues(cw.peerID.String()).Add(float64(unflushed)) // 统计数目，用id做key；The total number of bytes sent to peers.
 				unflushed = 0
 				continue
 			}
@@ -212,13 +220,13 @@ func (cw *streamWriter) run() {
 			if err == nil {
 				unflushed += m.Size()
 
-				if len(msgc) == 0 || batched > streamBufSize/2 {
+				if len(msgc) == 0 || batched > streamBufSize/2 { //批量flush的条件
 					//if m.Type == raftpb.MsgProp {
 					//fmt.Printf("process:%s, time:%+v, function:%+s, flush data from cache:%+v\n", "write msg", time.Now().Unix(), "server.etcdserver.api.rafthttp.stream.(streamWriter)Run()", m)
 					//}
 					debug.WriteLog("server.etcdserver.api.rafthttp.stream.(streamWriter)Run()", "flush data from cache", []raftpb.Message{m})
-					flusher.Flush() // 将数据刷入到对端
-					sentBytes.WithLabelValues(cw.peerID.String()).Add(float64(unflushed))
+					flusher.Flush()                                                       // 将数据刷入到对端
+					sentBytes.WithLabelValues(cw.peerID.String()).Add(float64(unflushed)) //The total number of bytes sent to peers.
 					unflushed = 0
 					batched = 0
 				} else {
@@ -229,7 +237,7 @@ func (cw *streamWriter) run() {
 			}
 
 			// 消息发送异常处理
-			cw.status.deactivate(failureType{source: t.String(), action: "write"}, err.Error())
+			cw.status.deactivate(failureType{source: t.String(), action: "write"}, err.Error()) // 各种失败计数
 			cw.close()
 			if cw.lg != nil {
 				cw.lg.Warn(
@@ -265,6 +273,7 @@ func (cw *streamWriter) run() {
 					zap.String("stream-type", t.String()),
 				)
 			}
+			// 初始化参数
 			flusher = conn.Flusher
 			unflushed = 0
 			cw.status.activate()
@@ -292,7 +301,7 @@ func (cw *streamWriter) run() {
 			}
 			heartbeatc, msgc = tickc.C, cw.msgc
 
-		case <-cw.stopc:
+		case <-cw.stopc: // 关闭连接
 			if cw.close() {
 				if cw.lg != nil {
 					cw.lg.Warn(
@@ -315,6 +324,7 @@ func (cw *streamWriter) run() {
 	}
 }
 
+// 返回msgc及状态
 func (cw *streamWriter) writec() (chan<- raftpb.Message, bool) {
 	cw.mu.Lock()
 	defer cw.mu.Unlock()
@@ -340,7 +350,7 @@ func (cw *streamWriter) closeUnlocked() bool {
 			)
 		}
 	}
-	if len(cw.msgc) > 0 {
+	if len(cw.msgc) > 0 { //数据没消费完，报异常
 		cw.r.ReportUnreachable(uint64(cw.peerID))
 	}
 	cw.msgc = make(chan raftpb.Message, streamBufSize)
@@ -390,6 +400,7 @@ type streamReader struct {
 	done   chan struct{}
 }
 
+// 初始化streamReader
 func (cr *streamReader) start() {
 	cr.done = make(chan struct{})
 	if cr.errorc == nil {
@@ -414,7 +425,7 @@ func (cr *streamReader) run() {
 	}
 
 	for {
-		rc, err := cr.dial(t) // 连接对端
+		rc, err := cr.dial(t) // 连接对端，读取数据
 		if err != nil {
 			if err != errUnsupportedStreamType {
 				cr.status.deactivate(failureType{source: t.String(), action: "dial"}, err.Error())
@@ -506,7 +517,7 @@ func (cr *streamReader) decodeLoop(rc io.ReadCloser, t streamType) error {
 
 	// gofail: labelRaftDropHeartbeat:
 	for {
-		m, err := dec.decode() // 读取数据
+		m, err := dec.decode() // 解码数据
 		if err != nil {
 			cr.mu.Lock()
 			cr.close()
@@ -522,7 +533,7 @@ func (cr *streamReader) decodeLoop(rc io.ReadCloser, t streamType) error {
 		paused := cr.paused
 		cr.mu.Unlock()
 
-		if paused {
+		if paused { // 暂停不处理
 			continue
 		}
 
@@ -533,6 +544,7 @@ func (cr *streamReader) decodeLoop(rc io.ReadCloser, t streamType) error {
 			continue
 		}
 
+		// 判断recvc类型
 		recvc := cr.recvc
 		if m.Type == raftpb.MsgProp { // msgProp类型则写入streamReader.propc
 			recvc = cr.propc
@@ -577,10 +589,11 @@ func (cr *streamReader) stop() {
 	<-cr.done
 }
 
+// 读取数据
 func (cr *streamReader) dial(t streamType) (io.ReadCloser, error) {
 	u := cr.picker.pick()
 	uu := u
-	uu.Path = path.Join(t.endpoint(cr.lg), cr.tr.ID.String())
+	uu.Path = path.Join(t.endpoint(cr.lg), cr.tr.ID.String()) //定义数据目录"/stream/msgapp/id2string"
 
 	if cr.lg != nil {
 		cr.lg.Debug(
@@ -590,6 +603,8 @@ func (cr *streamReader) dial(t streamType) (io.ReadCloser, error) {
 			zap.String("address", uu.String()),
 		)
 	}
+
+	//发送get请求
 	req, err := http.NewRequest("GET", uu.String(), nil)
 	if err != nil {
 		cr.picker.unreachable(u)
@@ -601,7 +616,7 @@ func (cr *streamReader) dial(t streamType) (io.ReadCloser, error) {
 	req.Header.Set("X-Etcd-Cluster-ID", cr.tr.ClusterID.String())
 	req.Header.Set("X-Raft-To", cr.peerID.String())
 
-	setPeerURLsHeader(req, cr.tr.URLs)
+	setPeerURLsHeader(req, cr.tr.URLs) // 所有url写入header头
 
 	req = req.WithContext(cr.ctx)
 
@@ -614,20 +629,23 @@ func (cr *streamReader) dial(t streamType) (io.ReadCloser, error) {
 	}
 	cr.mu.Unlock()
 
+	// 一种连接方式
 	resp, err := cr.tr.streamRt.RoundTrip(req)
 	if err != nil {
 		cr.picker.unreachable(u)
 		return nil, err
 	}
 
+	//从header获取版本号
 	rv := serverVersion(resp.Header)
 	lv := semver.Must(semver.NewVersion(version.Version))
-	if compareMajorMinorVersion(rv, lv) == -1 && !checkStreamSupport(rv, t) {
+	if compareMajorMinorVersion(rv, lv) == -1 && !checkStreamSupport(rv, t) { //比较版本号及消息支持对版本
 		httputil.GracefulClose(resp)
 		cr.picker.unreachable(u)
 		return nil, errUnsupportedStreamType
 	}
 
+	// 各种状态判断
 	switch resp.StatusCode {
 	case http.StatusGone:
 		httputil.GracefulClose(resp)
@@ -716,6 +734,7 @@ func (cr *streamReader) resume() {
 	cr.paused = false
 }
 
+// 判断版本是否被指定消息类型支持
 // checkStreamSupport checks whether the stream type is supported in the
 // given version.
 func checkStreamSupport(v *semver.Version, t streamType) bool {

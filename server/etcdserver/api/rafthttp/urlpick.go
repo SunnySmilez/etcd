@@ -27,12 +27,14 @@ type urlPicker struct {
 	picked int
 }
 
+// 实例化一个urlPicker
 func newURLPicker(urls types.URLs) *urlPicker {
 	return &urlPicker{
 		urls: urls,
 	}
 }
 
+// 更新urlPicker
 func (p *urlPicker) update(urls types.URLs) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -40,6 +42,7 @@ func (p *urlPicker) update(urls types.URLs) {
 	p.picked = 0
 }
 
+// 选择一个url
 func (p *urlPicker) pick() url.URL {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -52,6 +55,6 @@ func (p *urlPicker) unreachable(u url.URL) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if u == p.urls[p.picked] {
-		p.picked = (p.picked + 1) % len(p.urls)
+		p.picked = (p.picked + 1) % len(p.urls) // 指向下一个url
 	}
 }

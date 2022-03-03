@@ -182,6 +182,7 @@ func checkVersionCompatibility(name string, server, minCluster *semver.Version) 
 }
 
 // setPeerURLsHeader reports local urls for peer discovery
+// 设置header头信息
 func setPeerURLsHeader(req *http.Request, urls types.URLs) {
 	if urls == nil {
 		// often not set in unit tests

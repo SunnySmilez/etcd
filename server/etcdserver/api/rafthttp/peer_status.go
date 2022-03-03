@@ -46,6 +46,7 @@ func newPeerStatus(lg *zap.Logger, local, id types.ID) *peerStatus {
 	return &peerStatus{lg: lg, local: local, id: id}
 }
 
+// 记录次数
 func (s *peerStatus) activate() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -58,6 +59,7 @@ func (s *peerStatus) activate() {
 	}
 }
 
+// 各种失败计数
 func (s *peerStatus) deactivate(failure failureType, reason string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -67,8 +69,8 @@ func (s *peerStatus) deactivate(failure failureType, reason string) {
 		s.active = false
 		s.since = time.Time{}
 
-		activePeers.WithLabelValues(s.local.String(), s.id.String()).Dec()
-		disconnectedPeers.WithLabelValues(s.local.String(), s.id.String()).Inc()
+		activePeers.WithLabelValues(s.local.String(), s.id.String()).Dec()       //The current number of active peer connections.
+		disconnectedPeers.WithLabelValues(s.local.String(), s.id.String()).Inc() //The total number of disconnected peers
 		return
 	}
 
