@@ -39,6 +39,7 @@ type peerStatus struct {
 	since  time.Time
 }
 
+// 实例化peerStatus
 func newPeerStatus(lg *zap.Logger, local, id types.ID) *peerStatus {
 	if lg == nil {
 		lg = zap.NewNop()

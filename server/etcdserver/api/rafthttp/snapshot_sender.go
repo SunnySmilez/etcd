@@ -49,6 +49,7 @@ type snapshotSender struct {
 	stopc chan struct{}
 }
 
+// 实例化snapshot
 func newSnapshotSender(tr *Transport, picker *urlPicker, to types.ID, status *peerStatus) *snapshotSender {
 	return &snapshotSender{
 		from:   tr.ID,
@@ -75,6 +76,7 @@ func (s *snapshotSender) send(merged snap.Message) {
 	defer body.Close()
 
 	u := s.picker.pick()
+	// 创建post请求
 	req := createPostRequest(s.tr.Logger, u, RaftSnapshotPrefix, body, "application/octet-stream", s.tr.URLs, s.from, s.cid)
 
 	snapshotSizeVal := uint64(merged.TotalSize)
@@ -94,7 +96,7 @@ func (s *snapshotSender) send(merged snap.Message) {
 		snapshotSendInflights.WithLabelValues(to).Dec()
 	}()
 
-	err := s.post(req)
+	err := s.post(req) // 发送post消息
 	defer merged.CloseWithError(err)
 	if err != nil {
 		if s.tr.Logger != nil {
@@ -158,6 +160,7 @@ func (s *snapshotSender) post(req *http.Request) (err error) {
 	result := make(chan responseAndError, 1)
 
 	go func() {
+		// roundTrip发送消息
 		resp, err := s.tr.pipelineRt.RoundTrip(req)
 		if err != nil {
 			result <- responseAndError{resp, nil, err}
@@ -183,6 +186,7 @@ func (s *snapshotSender) post(req *http.Request) (err error) {
 	}
 }
 
+// 创建snap消息体
 func createSnapBody(lg *zap.Logger, merged snap.Message) io.ReadCloser {
 	buf := new(bytes.Buffer)
 	enc := &messageEncoder{w: buf}

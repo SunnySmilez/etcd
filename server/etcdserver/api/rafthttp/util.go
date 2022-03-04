@@ -60,6 +60,7 @@ func newStreamRoundTripper(tlsInfo transport.TLSInfo, dialTimeout time.Duration)
 	return transport.NewTimeoutTransport(tlsInfo, dialTimeout, ConnReadTimeout, ConnWriteTimeout)
 }
 
+// 创建一个post请求
 // createPostRequest creates a HTTP POST request that sends raft message.
 func createPostRequest(lg *zap.Logger, u url.URL, path string, body io.Reader, ct string, urls types.URLs, from, cid types.ID) *http.Request {
 	uu := u
@@ -80,6 +81,7 @@ func createPostRequest(lg *zap.Logger, u url.URL, path string, body io.Reader, c
 	return req
 }
 
+// 检验post的status
 // checkPostResponse checks the response of the HTTP POST request that sends
 // raft message.
 func checkPostResponse(lg *zap.Logger, resp *http.Response, body []byte, req *http.Request, to types.ID) error {

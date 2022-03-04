@@ -67,28 +67,39 @@ type Peer interface {
 	// and has no promise that the message will be received by the remote.
 	// When it fails to send message out, it will report the status to underlying
 	// raft.
+	// 发送数据到远端
 	send(m raftpb.Message)
 
+	// 发送合并的快照信息给远端
 	// sendSnap sends the merged snapshot message to the remote peer. Its behavior
 	// is similar to send.
 	sendSnap(m snap.Message)
 
 	// update updates the urls of remote peer.
+	// 更新远端peer地址
 	update(urls types.URLs)
 
 	// attachOutgoingConn attaches the outgoing connection to the peer for
 	// stream usage. After the call, the ownership of the outgoing
 	// connection hands over to the peer. The peer will close the connection
 	// when it is no longer used.
+	// 存储各种外部连接
 	attachOutgoingConn(conn *outgoingConn)
+
 	// activeSince returns the time that the connection with the
 	// peer becomes active.
+	// 活跃时间
 	activeSince() time.Time
+
 	// stop performs any necessary finalization and terminates the peer
 	// elegantly.
 	stop()
 }
 
+// 本地节点通过peer发送消息给远端节点
+// 每个节点有stream和pipeline两种机制发送消息
+// stream是常轮询接受消息；出了普通的流，peer还有msgApp的优化流，优化流占了很大一部分，只有leader使用
+// pipeline是一系列http客户端
 // peer is the representative of a remote raft node. Local raft node sends
 // messages to the remote through peer.
 // Each peer has two underlying mechanisms to send out a message: stream and
@@ -153,7 +164,7 @@ func startPeer(t *Transport, urls types.URLs, peerID types.ID, fs *stats.Followe
 		raft:          r,
 		errorc:        errorc,
 	}
-	pipeline.start()
+	pipeline.start() // 多协程处理pipeline消息
 
 	p := &peer{
 		lg:             t.Logger,
@@ -173,11 +184,12 @@ func startPeer(t *Transport, urls types.URLs, peerID types.ID, fs *stats.Followe
 
 	ctx, cancel := context.WithCancel(context.Background())
 	p.cancel = cancel
+	// 监听读取recvc数据
 	go func() {
 		for {
 			select {
 			case mm := <-p.recvc:
-				if err := r.Process(ctx, mm); err != nil {
+				if err := r.Process(ctx, mm); err != nil { // raft处理消息
 					if t.Logger != nil {
 						t.Logger.Warn("failed to process Raft message", zap.Error(err))
 					}
@@ -191,11 +203,12 @@ func startPeer(t *Transport, urls types.URLs, peerID types.ID, fs *stats.Followe
 	// r.Process might block for processing proposal when there is no leader.
 	// Thus propc must be put into a separate routine with recvc to avoid blocking
 	// processing other raft messages.
+	// 监听读取propc数据
 	go func() {
 		for {
 			select {
 			case mm := <-p.propc:
-				if err := r.Process(ctx, mm); err != nil {
+				if err := r.Process(ctx, mm); err != nil { // raft处理消息
 					if t.Logger != nil {
 						t.Logger.Warn("failed to process Raft message", zap.Error(err))
 					}
@@ -229,6 +242,7 @@ func startPeer(t *Transport, urls types.URLs, peerID types.ID, fs *stats.Followe
 		rl:     rate.NewLimiter(t.DialRetryFrequency, 1),
 	}
 
+	// 实例化两种消息类型的stream
 	p.msgAppV2Reader.start()
 	p.msgAppReader.start()
 
@@ -245,6 +259,7 @@ func (p *peer) send(m raftpb.Message) {
 		return
 	}
 
+	// 根据消息类型选择chan及返回名称
 	writec, name := p.pick(m)
 	select {
 	case writec <- m:
@@ -255,7 +270,7 @@ func (p *peer) send(m raftpb.Message) {
 			debug.WriteLog("server.etcdserver.api.rafthttp.peer.send", "write to writec", []raftpb.Message{m})
 		}
 	default:
-		fmt.Printf("role:peer here m %+v\n", m)
+		fmt.Printf("role:peer send error m %+v\n", m)
 		p.r.ReportUnreachable(m.To) //数据写入到n.recvc
 		if isMsgSnap(m) {
 			p.r.ReportSnapshot(m.To, raft.SnapshotFailure)
@@ -275,14 +290,17 @@ func (p *peer) send(m raftpb.Message) {
 	}
 }
 
+// 发送snap请求
 func (p *peer) sendSnap(m snap.Message) {
 	go p.snapSender.send(m)
 }
 
+// 替换url
 func (p *peer) update(urls types.URLs) {
 	p.picker.update(urls)
 }
 
+// 根据不同消息类型往streamWrite.connc中写入连接信息
 func (p *peer) attachOutgoingConn(conn *outgoingConn) {
 	var ok bool
 	switch conn.t {
@@ -302,6 +320,7 @@ func (p *peer) attachOutgoingConn(conn *outgoingConn) {
 
 func (p *peer) activeSince() time.Time { return p.status.activeSince() }
 
+// 暂停
 // Pause pauses the peer. The peer will simply drops all incoming
 // messages without returning an error.
 func (p *peer) Pause() {
@@ -312,6 +331,7 @@ func (p *peer) Pause() {
 	p.msgAppV2Reader.pause()
 }
 
+// 重启
 // Resume resumes a paused peer.
 func (p *peer) Resume() {
 	p.mu.Lock()
@@ -321,6 +341,7 @@ func (p *peer) Resume() {
 	p.msgAppV2Reader.resume()
 }
 
+// 关闭所有的连接
 func (p *peer) stop() {
 	if p.lg != nil {
 		p.lg.Info("stopping remote peer", zap.String("remote-peer-id", p.id.String()))
@@ -345,6 +366,7 @@ func (p *peer) stop() {
 // pick picks a chan for sending the given message. The picked chan and the picked chan
 // string name are returned.
 // writec()函数将数据写入streamWriter.msgc
+// 根据不同的消息类型选择不同的chan
 func (p *peer) pick(m raftpb.Message) (writec chan<- raftpb.Message, picked string) {
 	var ok bool
 	// Considering MsgSnap may have a big size, e.g., 1G, and will block
@@ -359,6 +381,7 @@ func (p *peer) pick(m raftpb.Message) (writec chan<- raftpb.Message, picked stri
 	return p.pipeline.msgc, pipelineMsg
 }
 
+// 判断消息类型
 func isMsgApp(m raftpb.Message) bool { return m.Type == raftpb.MsgApp }
 
 func isMsgSnap(m raftpb.Message) bool { return m.Type == raftpb.MsgSnap }

@@ -60,6 +60,7 @@ type pipeline struct {
 	stopc chan struct{}
 }
 
+// 起协程处理
 func (p *pipeline) start() {
 	p.stopc = make(chan struct{})
 	p.msgc = make(chan raftpb.Message, pipelineBufSize)
@@ -90,6 +91,7 @@ func (p *pipeline) stop() {
 	}
 }
 
+// 处理pipeline消息
 func (p *pipeline) handle() {
 	defer p.wg.Done()
 
@@ -97,10 +99,12 @@ func (p *pipeline) handle() {
 		select {
 		case m := <-p.msgc:
 			start := time.Now()
+			// 发送消息
 			err := p.post(pbutil.MustMarshal(&m))
 			end := time.Now()
 
-			if err != nil {
+			//记录成功失败信息
+			if err != nil { //发送失败
 				p.status.deactivate(failureType{source: pipelineMsg, action: "write"}, err.Error())
 
 				if m.Type == raftpb.MsgApp && p.followerStats != nil {
@@ -108,7 +112,7 @@ func (p *pipeline) handle() {
 				}
 				p.raft.ReportUnreachable(m.To)
 				if isMsgSnap(m) {
-					p.raft.ReportSnapshot(m.To, raft.SnapshotFailure)
+					p.raft.ReportSnapshot(m.To, raft.SnapshotFailure) //记录snapshot失败
 				}
 				sentFailures.WithLabelValues(types.ID(m.To).String()).Inc()
 				continue
@@ -132,6 +136,7 @@ func (p *pipeline) handle() {
 // error on any failure.
 func (p *pipeline) post(data []byte) (err error) {
 	u := p.picker.pick()
+	// 创建post请求
 	req := createPostRequest(p.tr.Logger, u, RaftPrefix, bytes.NewBuffer(data), "application/protobuf", p.tr.URLs, p.tr.ID, p.tr.ClusterID)
 
 	done := make(chan struct{}, 1)
@@ -147,6 +152,7 @@ func (p *pipeline) post(data []byte) (err error) {
 		}
 	}()
 
+	// 用roundTrip的方式发送请求
 	resp, err := p.tr.pipelineRt.RoundTrip(req)
 	done <- struct{}{}
 	if err != nil {
@@ -160,6 +166,7 @@ func (p *pipeline) post(data []byte) (err error) {
 		return err
 	}
 
+	// 检查post返回
 	err = checkPostResponse(p.tr.Logger, resp, b, req, p.peerID)
 	if err != nil {
 		p.picker.unreachable(u)
@@ -175,4 +182,5 @@ func (p *pipeline) post(data []byte) (err error) {
 }
 
 // waitSchedule waits other goroutines to be scheduled for a while
+// 让出cpu时间片
 func waitSchedule() { runtime.Gosched() }
