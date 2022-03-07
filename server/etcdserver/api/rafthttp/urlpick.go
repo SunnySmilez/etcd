@@ -35,6 +35,7 @@ func newURLPicker(urls types.URLs) *urlPicker {
 }
 
 // 更新urlPicker
+// 重置pick为0
 func (p *urlPicker) update(urls types.URLs) {
 	p.mu.Lock()
 	defer p.mu.Unlock()

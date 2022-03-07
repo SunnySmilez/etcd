@@ -60,7 +60,7 @@ type pipeline struct {
 	stopc chan struct{}
 }
 
-// 起协程处理
+// 起协程处理msgc消息
 func (p *pipeline) start() {
 	p.stopc = make(chan struct{})
 	p.msgc = make(chan raftpb.Message, pipelineBufSize)

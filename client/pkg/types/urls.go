@@ -25,6 +25,7 @@ import (
 
 type URLs []url.URL
 
+// 检验url格式，并进行排序
 func NewURLs(strs []string) (URLs, error) {
 	all := make([]url.URL, len(strs))
 	if len(all) == 0 {
@@ -53,6 +54,7 @@ func NewURLs(strs []string) (URLs, error) {
 	return us, nil
 }
 
+// 报错
 func MustNewURLs(strs []string) URLs {
 	urls, err := NewURLs(strs)
 	if err != nil {

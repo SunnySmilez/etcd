@@ -30,6 +30,7 @@ type remote struct {
 }
 
 func startRemote(tr *Transport, urls types.URLs, id types.ID) *remote {
+	// 实例化picker
 	picker := newURLPicker(urls)
 	status := newPeerStatus(tr.Logger, tr.ID, id)
 	pipeline := &pipeline{
@@ -40,7 +41,7 @@ func startRemote(tr *Transport, urls types.URLs, id types.ID) *remote {
 		raft:   tr.Raft,
 		errorc: tr.ErrorC,
 	}
-	pipeline.start()
+	pipeline.start() // 监听处理msgc
 
 	return &remote{
 		lg:       tr.Logger,
@@ -51,6 +52,7 @@ func startRemote(tr *Transport, urls types.URLs, id types.ID) *remote {
 	}
 }
 
+// 消息写入msgc中
 func (g *remote) send(m raftpb.Message) {
 	select {
 	case g.pipeline.msgc <- m:

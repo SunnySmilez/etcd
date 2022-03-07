@@ -90,6 +90,7 @@ type Transporter interface {
 	Stop()
 }
 
+// 通过peer收发raft消息
 // Transport implements Transporter interface. It provides the functionality
 // to send raft messages to peers, and receive raft messages from peers.
 // User should call Handler method to get a handler to serve requests
@@ -133,6 +134,7 @@ type Transport struct {
 }
 
 func (t *Transport) Start() error {
+	// 实例化stream,pipeline的roundTripper
 	var err error
 	t.streamRt, err = newStreamRoundTripper(t.TLSInfo, t.DialTimeout)
 	if err != nil {
@@ -156,6 +158,7 @@ func (t *Transport) Start() error {
 	return nil
 }
 
+// 实例化http的连接（pipieline，stream方式，snapShot）
 func (t *Transport) Handler() http.Handler {
 	pipelineHandler := newPipelineHandler(t, t.Raft, t.ClusterID)
 	streamHandler := newStreamHandler(t, t, t.Raft, t.ID, t.ClusterID)
@@ -168,6 +171,7 @@ func (t *Transport) Handler() http.Handler {
 	return mux
 }
 
+// 返回对应peer连接
 func (t *Transport) Get(id types.ID) Peer {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
@@ -191,12 +195,12 @@ func (t *Transport) Send(msgs []raftpb.Message) {
 		to := types.ID(m.To)
 
 		t.mu.RLock()
-		p, pok := t.peers[to]
-		g, rok := t.remotes[to]
+		p, pok := t.peers[to]   // 获取peer的信息
+		g, rok := t.remotes[to] // 获取remote信息
 		t.mu.RUnlock()
 
 		if pok {
-			if m.Type == raftpb.MsgApp {
+			if m.Type == raftpb.MsgApp { // leader发送的消息
 				t.ServerStats.SendAppendReq(m.Size())
 			}
 
@@ -207,7 +211,7 @@ func (t *Transport) Send(msgs []raftpb.Message) {
 
 			debug.WriteLog("server.etcdserver.api.rafthttp.transport.send", "call peer.send", []raftpb.Message{m})
 
-			p.send(m) // 将数据写入writec
+			p.send(m) // 将数据写入writec=> pipeline.msgc
 
 			continue
 		}
@@ -217,7 +221,7 @@ func (t *Transport) Send(msgs []raftpb.Message) {
 				fmt.Printf("role:transport remote send remote %+v\n", g)
 			}
 
-			g.send(m)
+			g.send(m) //将数据写入pipeline.msgc
 			continue
 		}
 
@@ -252,6 +256,7 @@ func (t *Transport) Stop() {
 	t.remotes = nil
 }
 
+// 暂停指定peer
 // CutPeer drops messages to the specified peer.
 func (t *Transport) CutPeer(id types.ID) {
 	t.mu.RLock()
@@ -267,6 +272,7 @@ func (t *Transport) CutPeer(id types.ID) {
 	}
 }
 
+// 重启指定peer
 // MendPeer recovers the message dropping behavior of the given peer.
 func (t *Transport) MendPeer(id types.ID) {
 	t.mu.RLock()
@@ -282,6 +288,7 @@ func (t *Transport) MendPeer(id types.ID) {
 	}
 }
 
+// 添加远程peer
 func (t *Transport) AddRemote(id types.ID, us []string) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -291,6 +298,7 @@ func (t *Transport) AddRemote(id types.ID, us []string) {
 		// stopping the transport; ignore any new connections.
 		return
 	}
+	// 已经存在不实例化
 	if _, ok := t.peers[id]; ok {
 		return
 	}
@@ -315,6 +323,7 @@ func (t *Transport) AddRemote(id types.ID, us []string) {
 	}
 }
 
+// 添加peer
 func (t *Transport) AddPeer(id types.ID, us []string) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -325,7 +334,7 @@ func (t *Transport) AddPeer(id types.ID, us []string) {
 	if _, ok := t.peers[id]; ok {
 		return
 	}
-	urls, err := types.NewURLs(us)
+	urls, err := types.NewURLs(us) // 获取一堆url并排序
 	if err != nil {
 		if t.Logger != nil {
 			t.Logger.Panic("failed NewURLs", zap.Strings("urls", us), zap.Error(err))
@@ -360,10 +369,11 @@ func (t *Transport) RemoveAllPeers() {
 	}
 }
 
+// 停止peer并从t.peers中删除,并关闭pipeline及stream通信通道
 // the caller of this function must have the peers mutex.
 func (t *Transport) removePeer(id types.ID) {
 	if peer, ok := t.peers[id]; ok {
-		peer.stop()
+		peer.stop() // 关闭所有连接
 	} else {
 		if t.Logger != nil {
 			t.Logger.Panic("unexpected removal of unknown remote peer", zap.String("remote-peer-id", id.String()))
@@ -383,6 +393,7 @@ func (t *Transport) removePeer(id types.ID) {
 	}
 }
 
+// 更新urls，重置pick；删除之前连接，再重连
 func (t *Transport) UpdatePeer(id types.ID, us []string) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -396,8 +407,10 @@ func (t *Transport) UpdatePeer(id types.ID, us []string) {
 			t.Logger.Panic("failed NewURLs", zap.Strings("urls", us), zap.Error(err))
 		}
 	}
+	// 更新urls，重置pick为0
 	t.peers[id].update(urls)
 
+	// 之前的连接删除后再添加
 	t.pipelineProber.Remove(id.String())
 	addPeerToProber(t.Logger, t.pipelineProber, id.String(), us, RoundTripperNameSnapshot, rttSec)
 	t.streamProber.Remove(id.String())
@@ -413,6 +426,7 @@ func (t *Transport) UpdatePeer(id types.ID, us []string) {
 	}
 }
 
+// 返回启动时间
 func (t *Transport) ActiveSince(id types.ID) time.Time {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
@@ -422,6 +436,7 @@ func (t *Transport) ActiveSince(id types.ID) time.Time {
 	return time.Time{}
 }
 
+// 发送合并的快照信息给远端
 func (t *Transport) SendSnapshot(m snap.Message) {
 	t.mu.Lock()
 	defer t.mu.Unlock()

@@ -146,6 +146,7 @@ func compareMajorMinorVersion(a, b *semver.Version) int {
 	}
 }
 
+// 获取server的版本号
 // serverVersion returns the server version from the given header.
 func serverVersion(h http.Header) *semver.Version {
 	verStr := h.Get("X-Server-Version")
@@ -156,6 +157,7 @@ func serverVersion(h http.Header) *semver.Version {
 	return semver.Must(semver.NewVersion(verStr))
 }
 
+// 获取cluster最小版本号
 // serverVersion returns the min cluster version from the given header.
 func minClusterVersion(h http.Header) *semver.Version {
 	verStr := h.Get("X-Min-Cluster-Version")
@@ -166,6 +168,7 @@ func minClusterVersion(h http.Header) *semver.Version {
 	return semver.Must(semver.NewVersion(verStr))
 }
 
+// 检验版本是否支持
 // checkVersionCompatibility checks whether the given version is compatible
 // with the local version.
 func checkVersionCompatibility(name string, server, minCluster *semver.Version) (
@@ -197,6 +200,7 @@ func setPeerURLsHeader(req *http.Request, urls types.URLs) {
 	req.Header.Set("X-PeerURLs", strings.Join(peerURLs, ","))
 }
 
+// 从header头获取url信息，并写入x-peerurls
 // addRemoteFromRequest adds a remote peer according to an http request header
 func addRemoteFromRequest(tr Transporter, r *http.Request) {
 	if from, err := types.IDFromString(r.Header.Get("X-Server-From")); err == nil {

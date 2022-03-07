@@ -23,6 +23,7 @@ import (
 	"go.uber.org/zap"
 )
 
+// leader的状态信息：记录了followers的状态信息
 // LeaderStats is used by the leader in an etcd cluster, and encapsulates
 // statistics about communication with its followers
 type LeaderStats struct {
@@ -38,6 +39,7 @@ type leaderStats struct {
 	Followers map[string]*FollowerStats `json:"followers"`
 }
 
+// 实例化leader对象
 // NewLeaderStats generates a new LeaderStats with the given id as leader
 func NewLeaderStats(lg *zap.Logger, id string) *LeaderStats {
 	if lg == nil {
@@ -52,6 +54,7 @@ func NewLeaderStats(lg *zap.Logger, id string) *LeaderStats {
 	}
 }
 
+// json加锁
 func (ls *LeaderStats) JSON() []byte {
 	ls.Lock()
 	stats := ls.leaderStats
@@ -64,6 +67,7 @@ func (ls *LeaderStats) JSON() []byte {
 	return b
 }
 
+// 实例化follower,follower信息同时也会添加进leader中
 func (ls *LeaderStats) Follower(name string) *FollowerStats {
 	ls.Lock()
 	defer ls.Unlock()
@@ -101,6 +105,7 @@ type CountsStats struct {
 }
 
 // Succ updates the FollowerStats with a successful send
+// 各种统计信息记录
 func (fs *FollowerStats) Succ(d time.Duration) {
 	fs.Lock()
 	defer fs.Unlock()
@@ -128,6 +133,7 @@ func (fs *FollowerStats) Succ(d time.Duration) {
 }
 
 // Fail updates the FollowerStats with an unsuccessful send
+// 失败数记录
 func (fs *FollowerStats) Fail() {
 	fs.Lock()
 	defer fs.Unlock()

@@ -17,6 +17,7 @@ package ioutil
 
 import "io"
 
+// 限制读取数据的总量
 // NewLimitedBufferReader returns a reader that reads from the given reader
 // but limits the amount of data returned to at most n bytes.
 func NewLimitedBufferReader(r io.Reader, n int) io.Reader {
@@ -31,6 +32,7 @@ type limitedBufferReader struct {
 	n int
 }
 
+// 读取数据（超过范围则抛弃之前的）
 func (r *limitedBufferReader) Read(p []byte) (n int, err error) {
 	np := p
 	if len(np) > r.n {

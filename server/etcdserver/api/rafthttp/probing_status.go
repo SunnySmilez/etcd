@@ -38,6 +38,7 @@ var (
 	statusErrorInterval      = 5 * time.Second
 )
 
+// 添加连接到Prober并监听状态
 func addPeerToProber(lg *zap.Logger, p probing.Prober, id string, us []string, roundTripperName string, rttSecProm *prometheus.HistogramVec) {
 	hus := make([]string, len(us))
 	for i := range us {
@@ -57,6 +58,7 @@ func addPeerToProber(lg *zap.Logger, p probing.Prober, id string, us []string, r
 	go monitorProbingStatus(lg, s, id, roundTripperName, rttSecProm)
 }
 
+// 定时监听prober状态
 func monitorProbingStatus(lg *zap.Logger, s probing.Status, id string, roundTripperName string, rttSecProm *prometheus.HistogramVec) {
 	// set the first interval short to log error early.
 	interval := statusErrorInterval

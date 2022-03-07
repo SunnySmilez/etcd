@@ -30,6 +30,7 @@ import (
 
 var ErrNoDBSnapshot = errors.New("snap: snapshot file doesn't exist")
 
+// 将数据存储到文件中
 // SaveDBFrom saves snapshot of the database from the given reader. It
 // guarantees the save operation is atomic.
 func (s *Snapshotter) SaveDBFrom(r io.Reader, id uint64) (int64, error) {
@@ -43,6 +44,7 @@ func (s *Snapshotter) SaveDBFrom(r io.Reader, id uint64) (int64, error) {
 	n, err = io.Copy(f, r)
 	if err == nil {
 		fsyncStart := time.Now()
+		// 调用方法将系统缓存内数据写入磁盘
 		err = fileutil.Fsync(f)
 		snapDBFsyncSec.Observe(time.Since(fsyncStart).Seconds())
 	}
@@ -51,7 +53,7 @@ func (s *Snapshotter) SaveDBFrom(r io.Reader, id uint64) (int64, error) {
 		os.Remove(f.Name())
 		return n, err
 	}
-	fn := s.dbFilePath(id)
+	fn := s.dbFilePath(id) // 获取db路径
 	if fileutil.Exist(fn) {
 		os.Remove(f.Name())
 		return n, nil
@@ -73,6 +75,7 @@ func (s *Snapshotter) SaveDBFrom(r io.Reader, id uint64) (int64, error) {
 	return n, nil
 }
 
+// 返回db路径
 // DBFilePath returns the file path for the snapshot of the database with
 // given id. If the snapshot does not exist, it returns error.
 func (s *Snapshotter) DBFilePath(id uint64) (string, error) {

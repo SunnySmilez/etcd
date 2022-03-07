@@ -682,9 +682,9 @@ func (h *downgradeEnabledHandler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 	w.Write([]byte(strconv.FormatBool(enabled)))
 }
 
+// 接收消息的时候，调用该方法处理(pipiline,snap 入口)
 // Process takes a raft message and applies it to the server's raft state
 // machine, respecting any timeout of the given context.
-// 接收消息的时候，调用该方法处理
 func (s *EtcdServer) Process(ctx context.Context, m raftpb.Message) error {
 	lg := s.Logger()
 	if s.cluster.IsIDRemoved(types.ID(m.From)) {

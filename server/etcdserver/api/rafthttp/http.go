@@ -73,6 +73,7 @@ type pipelineHandler struct {
 	cid     types.ID
 }
 
+// 实例化pipeline
 // newPipelineHandler returns a handler for handling raft messages
 // from pipeline for RaftPrefix.
 //
@@ -92,6 +93,7 @@ func newPipelineHandler(t *Transport, r Raft, cid types.ID) http.Handler {
 	return h
 }
 
+// 处理所有http请求：处理version，限制读入总大小，发起raft请求
 func (h *pipelineHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "POST" {
 		w.Header().Set("Allow", "POST")
@@ -106,8 +108,10 @@ func (h *pipelineHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	//从header头获取url信息，并写入x-peerurls
 	addRemoteFromRequest(h.tr, r)
 
+	// 限制总量读取数据
 	// Limit the data size that could be read from the request body, which ensures that read from
 	// connection will not time out accidentally due to possible blocking in underlying implementation.
 	limitedr := pioutil.NewLimitedBufferReader(r.Body, connReadLimitByte)
@@ -137,7 +141,7 @@ func (h *pipelineHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	receivedBytes.WithLabelValues(types.ID(m.From).String()).Add(float64(len(b)))
 
-	if err := h.r.Process(context.TODO(), m); err != nil {
+	if err := h.r.Process(context.TODO(), m); err != nil { // 发起raft请求
 		switch v := err.(type) {
 		case writerToResponse:
 			v.WriteTo(w)
@@ -187,6 +191,7 @@ func newSnapshotHandler(t *Transport, r Raft, snapshotter *snap.Snapshotter, cid
 
 const unknownSnapshotSender = "UNKNOWN_SNAPSHOT_SENDER"
 
+// 处理snapshot请求：处理版本，写入db，发起raft请求
 // ServeHTTP serves HTTP request to receive and process snapshot message.
 //
 // If request sender dies without closing underlying TCP connection,
@@ -263,8 +268,8 @@ func (h *snapshotHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		zap.String("incoming-snapshot-message-size", humanize.Bytes(uint64(msgSize))),
 	)
 
+	// 数据存储到db文件
 	// save incoming database snapshot.
-
 	n, err := h.snapshotter.SaveDBFrom(r.Body, m.Snapshot.Metadata.Index)
 	if err != nil {
 		msg := fmt.Sprintf("failed to save KV snapshot (%v)", err)
@@ -293,6 +298,7 @@ func (h *snapshotHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		zap.String("download-took", downloadTook.String()),
 	)
 
+	// 发起raft请求
 	if err := h.r.Process(context.TODO(), m); err != nil {
 		switch v := err.(type) {
 		// Process may return writerToResponse error when doing some
@@ -345,6 +351,8 @@ func newStreamHandler(t *Transport, pg peerGetter, r Raft, id, cid types.ID) htt
 	return h
 }
 
+// 处理stream请求
+// 比对版本，设置头信息；实例化outgoingConn将实例连接写入stream.connc
 func (h *streamHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "GET" {
 		w.Header().Set("Allow", "GET")
@@ -451,6 +459,7 @@ func (h *streamHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	<-c.closeNotify()
 }
 
+// 从header头获取信息，并比对版本是否支持
 // checkClusterCompatibilityFromHeader checks the cluster compatibility of
 // the local member from the given header.
 // It checks whether the version of local member is compatible with
@@ -459,18 +468,21 @@ func (h *streamHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func checkClusterCompatibilityFromHeader(lg *zap.Logger, localID types.ID, header http.Header, cid types.ID) error {
 	remoteName := header.Get("X-Server-From")
 
+	// 获取server版本号
 	remoteServer := serverVersion(header)
 	remoteVs := ""
 	if remoteServer != nil {
 		remoteVs = remoteServer.String()
 	}
 
+	// 获取cluster最小版本号
 	remoteMinClusterVer := minClusterVersion(header)
 	remoteMinClusterVs := ""
 	if remoteMinClusterVer != nil {
 		remoteMinClusterVs = remoteMinClusterVer.String()
 	}
 
+	// 检验版本是否支持
 	localServer, localMinCluster, err := checkVersionCompatibility(remoteName, remoteServer, remoteMinClusterVer)
 
 	localVs := ""
