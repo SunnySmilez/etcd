@@ -22,22 +22,23 @@ import (
 
 // Equivalent returns a nil error if the inputs describe the same configuration.
 // On mismatch, returns a descriptive error showing the differences.
+// 对confState进行排序，并比对slice是否相等
 func (cs ConfState) Equivalent(cs2 ConfState) error {
 	cs1 := cs
 	orig1, orig2 := cs1, cs2
-	s := func(sl *[]uint64) {
+	s := func(sl *[]uint64) { // 排序
 		*sl = append([]uint64(nil), *sl...)
 		sort.Slice(*sl, func(i, j int) bool { return (*sl)[i] < (*sl)[j] })
 	}
 
-	for _, cs := range []*ConfState{&cs1, &cs2} {
+	for _, cs := range []*ConfState{&cs1, &cs2} { //对cs1，cs2进行排序
 		s(&cs.Voters)
 		s(&cs.Learners)
 		s(&cs.VotersOutgoing)
 		s(&cs.LearnersNext)
 	}
 
-	if !reflect.DeepEqual(cs1, cs2) {
+	if !reflect.DeepEqual(cs1, cs2) { // 比较slice是不是相等
 		return fmt.Errorf("ConfStates not equivalent after sorting:\n%+#v\n%+#v\nInputs were:\n%+#v\n%+#v", cs1, cs2, orig1, orig2)
 	}
 	return nil

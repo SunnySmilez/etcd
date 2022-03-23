@@ -24,6 +24,7 @@ import (
 
 type unixTransport struct{ *http.Transport }
 
+// todo 这块没太看懂
 func NewTransport(info TLSInfo, dialtimeoutd time.Duration) (*http.Transport, error) {
 	cfg, err := info.ClientConfig()
 	if err != nil {
@@ -31,15 +32,20 @@ func NewTransport(info TLSInfo, dialtimeoutd time.Duration) (*http.Transport, er
 	}
 
 	t := &http.Transport{
+		// Proxy指定一个对给定请求返回代理的函数。如果该函数返回了非nil的错误值，请求的执行就会中断并返回该错误。
+		// 如果Proxy为nil或返回nil的*URL值，将不使用代理
 		Proxy: http.ProxyFromEnvironment,
+
 		DialContext: (&net.Dialer{
 			Timeout: dialtimeoutd,
 			// value taken from http.DefaultTransport
 			KeepAlive: 30 * time.Second,
 		}).DialContext,
+		// TLSHandshakeTimeout指定等待TLS握手完成的最长时间。零值表示不设置超时。
 		// value taken from http.DefaultTransport
 		TLSHandshakeTimeout: 10 * time.Second,
-		TLSClientConfig:     cfg,
+		// TLSClientConfig指定用于tls.Client的TLS配置信息。如果该字段为nil，会使用默认的配置信息。
+		TLSClientConfig: cfg,
 	}
 
 	dialer := &net.Dialer{
@@ -63,12 +69,14 @@ func NewTransport(info TLSInfo, dialtimeoutd time.Duration) (*http.Transport, er
 	}
 	ut := &unixTransport{tu}
 
+	// 注册协议
 	t.RegisterProtocol("unix", ut)
 	t.RegisterProtocol("unixs", ut)
 
 	return t, nil
 }
 
+// 所有http都会走到这
 func (urt *unixTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	url := *req.URL
 	req.URL = &url

@@ -111,13 +111,15 @@ func (c *Config) Clone() Config {
 	}
 }
 
+// 记录了使用对配置，包含所有node的信息，并匹配对应的索引
+// todo 不是太清楚用途
 // ProgressTracker tracks the currently active configuration and the information
 // known about the nodes and learners in it. In particular, it tracks the match
 // index for each peer which in turn allows reasoning about the committed index.
 type ProgressTracker struct {
 	Config
 
-	Progress ProgressMap
+	Progress ProgressMap // 记录follower节点同步状态及对应的配置信息
 
 	Votes map[uint64]bool
 
@@ -178,6 +180,7 @@ func (p *ProgressTracker) Committed() uint64 {
 	return uint64(p.Voters.CommittedIndex(matchAckIndexer(p.Progress)))
 }
 
+// 排序
 func insertionSort(sl []uint64) {
 	a, b := 0, len(sl)
 	for i := a + 1; i < b; i++ {
@@ -187,9 +190,10 @@ func insertionSort(sl []uint64) {
 	}
 }
 
+// 获取id并进行排序，然后调用传入的函数
 // Visit invokes the supplied closure for all tracked progresses in stable order.
 func (p *ProgressTracker) Visit(f func(id uint64, pr *Progress)) {
-	n := len(p.Progress)
+	n := len(p.Progress) // 这里记录的是id对应的索引
 	// We need to sort the IDs and don't want to allocate since this is hot code.
 	// The optimization here mirrors that in `(MajorityConfig).CommittedIndex`,
 	// see there for details.
@@ -205,7 +209,7 @@ func (p *ProgressTracker) Visit(f func(id uint64, pr *Progress)) {
 		ids[n] = id
 	}
 	//fmt.Printf("role:raft-tracker ids:%+v\n", ids)// 此处打印的是node的id值
-	insertionSort(ids) //todo 没弄懂要做什么
+	insertionSort(ids) //对id进行排序
 	for _, id := range ids {
 		f(id, p.Progress[id])
 	}
@@ -249,6 +253,7 @@ func (p *ProgressTracker) LearnerNodes() []uint64 {
 	return nodes
 }
 
+// 重置选举信息
 // ResetVotes prepares for a new round of vote counting via recordVote.
 func (p *ProgressTracker) ResetVotes() {
 	p.Votes = map[uint64]bool{}

@@ -26,6 +26,7 @@ type ReadState struct {
 	RequestCtx []byte
 }
 
+// 读取数据的索引及数据
 type readIndexStatus struct {
 	req   pb.Message
 	index uint64
@@ -38,14 +39,14 @@ type readIndexStatus struct {
 
 type readOnly struct {
 	option           ReadOnlyOption
-	pendingReadIndex map[string]*readIndexStatus
+	pendingReadIndex map[string]*readIndexStatus // 读取数据的索引及数据
 	readIndexQueue   []string
 }
 
 func newReadOnly(option ReadOnlyOption) *readOnly {
 	return &readOnly{
 		option:           option,
-		pendingReadIndex: make(map[string]*readIndexStatus),
+		pendingReadIndex: make(map[string]*readIndexStatus), // 读取数据的索引及数据
 	}
 }
 

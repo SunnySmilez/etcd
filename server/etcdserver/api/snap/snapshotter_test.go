@@ -17,6 +17,7 @@ package snap
 import (
 	"fmt"
 	"hash/crc32"
+	math_bits "math/bits"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -303,4 +304,21 @@ func TestReleaseSnapDBs(t *testing.T) {
 			t.Errorf("expected %s (index: %d) to be retained, but it no longer exists", filename, index)
 		}
 	}
+}
+
+func TestIgnore(t *testing.T) {
+	i := 1
+	_ = i // 避免报错
+	print(i)
+}
+
+func TestCopy(t *testing.T) {
+	a := []byte("hello")
+	i := len(a)
+	copy(a[2:i], []byte(" world"))
+	print(string(a)) // output:he wo
+}
+
+func TestSnapSize(t *testing.T) {
+	print((math_bits.Len64(2|1) + 6) / 7)
 }

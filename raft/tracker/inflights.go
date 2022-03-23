@@ -14,6 +14,7 @@
 
 package tracker
 
+// 一个限制MsgApp类型消息的队列
 // Inflights limits the number of MsgApp (represented by the largest index
 // contained within) sent to followers but not yet acknowledged by them. Callers
 // use Full() to check whether more messages can be sent, call Add() whenever

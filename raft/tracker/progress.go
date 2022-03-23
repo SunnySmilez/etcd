@@ -28,6 +28,8 @@ import (
 // strewn around `*raft.raft`. Additionally, some fields are only used when in a
 // certain State. All of this isn't ideal.
 type Progress struct {
+	// match对应follower节点当前已经成功复制的entry记录的索引值
+	// next下一个待复制的索引值
 	Match, Next uint64
 	// State defines how the leader should interact with the follower.
 	//
@@ -40,27 +42,28 @@ type Progress struct {
 	//
 	// When in StateSnapshot, leader should have sent out snapshot
 	// before and stops sending any replication message.
-	State StateType
+	State StateType // follower节点的状态
 
 	// PendingSnapshot is used in StateSnapshot.
 	// If there is a pending snapshot, the pendingSnapshot will be set to the
 	// index of the snapshot. If pendingSnapshot is set, the replication process of
 	// this Progress will be paused. raft will not resend snapshot until the pending one
 	// is reported to be failed.
-	PendingSnapshot uint64
+	PendingSnapshot uint64 //当前正在发送的快照信息
 
 	// RecentActive is true if the progress is recently active. Receiving any messages
 	// from the corresponding follower indicates the progress is active.
 	// RecentActive can be reset to false after an election timeout.
 	//
 	// TODO(tbg): the leader should always have this set to true.
-	RecentActive bool
+	RecentActive bool //对应的follower节点是否存活
 
 	// ProbeSent is used while this follower is in StateProbe. When ProbeSent is
 	// true, raft should pause sending replication message to this peer until
 	// ProbeSent is reset. See ProbeAcked() and IsPaused().
 	ProbeSent bool
 
+	// 一个限制消息条数的队列
 	// Inflights is a sliding window for the inflight messages.
 	// Each inflight message contains one or more log entries.
 	// The max number of entries per message is defined in raft config as MaxSizePerMsg.

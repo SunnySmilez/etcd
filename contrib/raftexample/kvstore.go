@@ -42,22 +42,25 @@ type kv struct {
 func newKVStore(snapshotter *snap.Snapshotter, proposeC chan<- string, commitC <-chan *commit, errorC <-chan error) *kvstore {
 	s := &kvstore{proposeC: proposeC, kvStore: make(map[string]string), snapshotter: snapshotter}
 	fmt.Printf("s:%+v\n", s)
+	// 加载快照文件中的数据
 	snapshot, err := s.loadSnapshot()
 	if err != nil {
 		log.Panic(err)
 	}
+	// 将快照中的数据写入到map中
 	if snapshot != nil {
 		log.Printf("loading snapshot at term %d and index %d", snapshot.Metadata.Term, snapshot.Metadata.Index)
 		if err := s.recoverFromSnapshot(snapshot.Data); err != nil {
 			log.Panic(err)
 		}
 	}
+	// 读取raft写入commitC的数据
 	// read commits from raft into kvStore map until error
 	go s.readCommits(commitC, errorC)
 	return s
 }
 
-// 读取指定key的数据
+// 读取指定key的数据，map中查找
 func (s *kvstore) Lookup(key string) (string, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -85,6 +88,7 @@ func (s *kvstore) Propose(k string, v string) {
 */
 func (s *kvstore) readCommits(commitC <-chan *commit, errorC <-chan error) {
 	for commit := range commitC {
+		// 从快照中获取一遍数据
 		if commit == nil {
 			// signaled to load snapshot
 			snapshot, err := s.loadSnapshot()
@@ -100,6 +104,7 @@ func (s *kvstore) readCommits(commitC <-chan *commit, errorC <-chan error) {
 			continue
 		}
 
+		// 消费commitC中的每一条数据，写入kv中
 		for _, data := range commit.data {
 			var dataKv kv
 			dec := gob.NewDecoder(bytes.NewBufferString(data))
@@ -136,7 +141,7 @@ func (s *kvstore) loadSnapshot() (*raftpb.Snapshot, error) {
 	return snapshot, nil
 }
 
-// 将快照中的数据写入到kv中
+// 将快照中的数据写入到kv中，jsonUnmarshal
 func (s *kvstore) recoverFromSnapshot(snapshot []byte) error {
 	var store map[string]string
 	if err := json.Unmarshal(snapshot, &store); err != nil {

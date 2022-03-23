@@ -16,6 +16,7 @@ package transport
 
 import (
 	"crypto/tls"
+	"fmt"
 	"net/http"
 	"strings"
 	"testing"
@@ -71,4 +72,14 @@ func TestNewTransportTLSInvalidCipherSuitesTLS12(t *testing.T) {
 	}()
 	<-donec
 	<-donec
+}
+
+func TestRegisterProtocol(t *testing.T) {
+	t1 := &http.Transport{}
+	t1.RegisterProtocol("file", http.NewFileTransport(http.Dir("/")))
+	c := &http.Client{Transport: t1}
+	res, err := c.Get("file:///Users/zhouzhi/Desktop/1.txt")
+	b := []byte{}
+	res.Body.Read(b)
+	fmt.Printf("res:%+v\n, err:%+v, body:%+v", res, err, string(b))
 }

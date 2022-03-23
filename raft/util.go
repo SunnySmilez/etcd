@@ -224,6 +224,7 @@ func limitSize(ents []pb.Entry, maxSize uint64) []pb.Entry {
 	return ents[:limit]
 }
 
+// cs1，cs2转换为slice，排序比对是否相等
 func assertConfStatesEquivalent(l Logger, cs1, cs2 pb.ConfState) {
 	err := cs1.Equivalent(cs2)
 	if err == nil {

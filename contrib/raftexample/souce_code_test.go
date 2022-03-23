@@ -10,9 +10,9 @@ import (
 )
 
 func TestCommand(t *testing.T) {
-	//cd ~/Desktop/code/go_project/src/etcd/contrib/raftexample && go mod vendor && go build -o raftexample && ./raftexample --id 1 --cluster http://127.0.0.1:12379,http://127.0.0.1:22379,http://127.0.0.1:32379 --port 12380
-	//cd ~/Desktop/code/go_project/src/etcd/contrib/raftexample && ./raftexample --id 2 --cluster http://127.0.0.1:12379,http://127.0.0.1:22379,http://127.0.0.1:32379 --port 22380
-	//cd ~/Desktop/code/go_project/src/etcd/contrib/raftexample && ./raftexample --id 3 --cluster http://127.0.0.1:12379,http://127.0.0.1:22379,http://127.0.0.1:32379 --port 32380
+	//cd /Users/zhouzhi/Desktop/next/etcd/contrib/raftexample && go mod vendor && go build -o raftexample && ./raftexample --id 1 --cluster http://127.0.0.1:12379,http://127.0.0.1:22379,http://127.0.0.1:32379 --port 12380
+	//cd /Users/zhouzhi/Desktop/next/etcd/contrib/raftexample && ./raftexample --id 2 --cluster http://127.0.0.1:12379,http://127.0.0.1:22379,http://127.0.0.1:32379 --port 22380
+	//cd /Users/zhouzhi/Desktop/next/etcd/contrib/raftexample && ./raftexample --id 3 --cluster http://127.0.0.1:12379,http://127.0.0.1:22379,http://127.0.0.1:32379 --port 32380
 	//写入数据：curl -L http://127.0.0.1:22380/my-key12 -XPUT -d bar
 	//读取数据：curl -L http://127.0.0.1:32380/my-key
 	//添加节点：curl -L http://127.0.0.1:12380/4 -XPOST -d http://127.0.0.1:42379
@@ -87,4 +87,16 @@ func testChan(b chan<- int) {
 	b <- 2
 	b <- 3
 	close(b)
+}
+
+func TestSwitch(t *testing.T) {
+	a := 1
+	switch a {
+	case 1:
+		print("2")
+	case 2:
+		print("2")
+	default:
+		print("default")
+	}
 }

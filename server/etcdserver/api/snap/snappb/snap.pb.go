@@ -83,6 +83,7 @@ var fileDescriptor_f2e3c045ebf84d00 = []byte{
 	0x01, 0x10, 0x00, 0x00, 0xff, 0xff, 0xd8, 0x0f, 0x32, 0xb2, 0x78, 0x00, 0x00, 0x00,
 }
 
+// marshal
 func (m *Snapshot) Marshal() (dAtA []byte, err error) {
 	size := m.Size()
 	dAtA = make([]byte, size)
@@ -98,14 +99,15 @@ func (m *Snapshot) MarshalTo(dAtA []byte) (int, error) {
 	return m.MarshalToSizedBuffer(dAtA[:size])
 }
 
+// 数据都放入dATA中，返回的是填充都数据的长度
 func (m *Snapshot) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 	i := len(dAtA)
-	_ = i
+	_ = i // 避免报错
 	var l int
 	_ = l
 	if m.XXX_unrecognized != nil {
 		i -= len(m.XXX_unrecognized)
-		copy(dAtA[i:], m.XXX_unrecognized)
+		copy(dAtA[i:], m.XXX_unrecognized) // 从后往前放数据
 	}
 	if m.Data != nil {
 		i -= len(m.Data)
@@ -131,6 +133,8 @@ func encodeVarintSnap(dAtA []byte, offset int, v uint64) int {
 	dAtA[offset] = uint8(v)
 	return base
 }
+
+// 返回的是m.crc+m.data+m.XXX_unrecognized的长度
 func (m *Snapshot) Size() (n int) {
 	if m == nil {
 		return 0
@@ -148,13 +152,15 @@ func (m *Snapshot) Size() (n int) {
 	return n
 }
 
+// 大概率是返回1 ：math_bits.Len64返回的是两者的最小值，具体func注释
 func sovSnap(x uint64) (n int) {
 	return (math_bits.Len64(x|1) + 6) / 7
 }
+
 func sozSnap(x uint64) (n int) {
 	return sovSnap(uint64((x << 1) ^ uint64((int64(x) >> 63))))
 }
-func (m *Snapshot) Unmarshal(dAtA []byte) error {
+func (m *Snapshot) Unmarshal(dAtA []byte) error { // 从各个段将对应数据解析出来
 	l := len(dAtA)
 	iNdEx := 0
 	for iNdEx < l {

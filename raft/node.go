@@ -43,6 +43,7 @@ type SoftState struct {
 	RaftState StateType
 }
 
+// lead相同并且相同状态
 func (a *SoftState) equal(b *SoftState) bool {
 	return a.Lead == b.Lead && a.RaftState == b.RaftState
 }
@@ -90,11 +91,13 @@ type Ready struct {
 	MustSync bool
 }
 
+// term，vote，commit都相等则严格相等
 func isHardStateEqual(a, b pb.HardState) bool {
 	return a.Term == b.Term && a.Vote == b.Vote && a.Commit == b.Commit
 }
 
 // IsEmptyHardState returns true if the given HardState is empty.
+//  term，vote，commit为空
 func IsEmptyHardState(st pb.HardState) bool {
 	return isHardStateEqual(st, emptyState)
 }
@@ -241,13 +244,13 @@ func StartNode(c *Config, peers []Peer) Node {
 // If the caller has an existing state machine, pass in the last log index that
 // has been applied to it; otherwise use zero.
 func RestartNode(c *Config) Node {
-	rn, err := NewRawNode(c)
+	rn, err := NewRawNode(c) // 初始化raft
 	if err != nil {
 		panic(err)
 	}
-	n := newNode(rn)
+	n := newNode(rn) // 初始化各种channel
 	fmt.Print("restart node \n")
-	go n.run()
+	go n.run() // 监听channel
 	return &n
 }
 
@@ -272,6 +275,7 @@ type node struct {
 	rn *RawNode
 }
 
+// 初始化各种channel
 func newNode(rn *RawNode) node {
 	return node{
 		propc:      make(chan msgWithResult),
@@ -304,6 +308,7 @@ func (n *node) Stop() {
 }
 
 // node跟raft数据写入逻辑
+// 数据在此处消费：kv数据写入raftnode.propc,此时将对应数据进行传输写入raftnode.node.propc；数据写入到节点中
 func (n *node) run() {
 	var propc chan msgWithResult
 	var readyc chan Ready
@@ -327,7 +332,7 @@ func (n *node) run() {
 			// handled first, but it's generally good to emit larger Readys plus
 			// it simplifies testing (by emitting less frequently and more
 			// predictably).
-			rd = n.rn.readyWithoutAccept()
+			rd = n.rn.readyWithoutAccept() // 将raft.msgs数据写入rd.message并补充部分属性数据
 			// 查看MsgProp日志，不是项目代码
 			//if len(r.msgs) != 0 && rd.Messages[0].Type != pb.MsgHeartbeat && rd.Messages[0].Type != pb.MsgHeartbeatResp {
 			if len(r.msgs) != 0 && rd.Messages[0].Type == pb.MsgProp {
@@ -339,7 +344,7 @@ func (n *node) run() {
 			readyc = n.readyc
 		}
 
-		if lead != r.lead {
+		if lead != r.lead { // 如果不是leader，判断是否存在lead
 			if r.hasLeader() {
 				if lead == None {
 					r.logger.Infof("raft.node: %x elected leader %x at term %d", r.id, r.lead, r.Term)
@@ -354,23 +359,24 @@ func (n *node) run() {
 			lead = r.lead
 		}
 
+		// 监听对应channel
 		select {
 		// TODO: maybe buffer the config propose if there exists one (the way
 		// described in raft dissertation)
 		// Currently it is dropped in Step silently.
-		case pm := <-propc:
+		case pm := <-propc: //prop类型写入propc，获取写入的数据
 			// 消费Propose->stepWait写入的数据
 			//fmt.Printf("role:node, deal n.propc data who is send by step/stepWait, time:%+v\n", time.Now())
 			//fmt.Printf("process:%s, time:%+v, function:%+s, msg:%+v\n", "write msg", time.Now().Unix(), "raft.node.run", "read msg from propc")
 			debug.WriteLog("raft.node.run", "read msg from propc", []pb.Message{pm.m})
 			m := pm.m
-			m.From = r.id
+			m.From = r.id // 当前写入节点的id
 			err := r.Step(m)
 			if pm.result != nil {
-				pm.result <- err
+				pm.result <- err //错误消息写入
 				close(pm.result)
 			}
-		case m := <-n.recvc:
+		case m := <-n.recvc: // 非prop类型数据写入recvs
 			// filter out response message from unknown From.
 			if pr := r.prs.Progress[m.From]; pr != nil || !IsResponseMsg(m.Type) {
 				r.Step(m)
@@ -408,14 +414,14 @@ func (n *node) run() {
 			}
 		case <-n.tickc:
 			n.rn.Tick()
-		case readyc <- rd: // 写入数据到readyc
+		case readyc <- rd: // rd数据写入数据到readyc（rd来自raft.msgs的数据）
 			//if len(r.msgs) != 0 && rd.Messages[0].Type != pb.MsgHeartbeat && rd.Messages[0].Type != pb.MsgHeartbeatResp {
 			if len(r.msgs) != 0 && rd.Messages[0].Type == pb.MsgProp {
 				fmt.Printf("role:node, write data to readyc\n")
 			}
 			n.rn.acceptReady(rd)  // 将数据删除
 			advancec = n.advancec // advances写入数据
-		case <-advancec:
+		case <-advancec: // todo 此处会做什么？
 			//if len(r.msgs) != 0 && rd.Messages[0].Type != pb.MsgHeartbeat && rd.Messages[0].Type != pb.MsgHeartbeatResp {
 			if len(r.msgs) != 0 && rd.Messages[0].Type == pb.MsgProp {
 				fmt.Printf("advancec here\n")
@@ -446,7 +452,7 @@ func (n *node) Tick() {
 
 func (n *node) Campaign(ctx context.Context) error { return n.step(ctx, pb.Message{Type: pb.MsgHup}) }
 
-// 写入数据
+// 将raftnode.propc数据写入到raftnode.node.propc
 func (n *node) Propose(ctx context.Context, data []byte) error {
 	//fmt.Printf("process:%s, time:%+v, function:%+s, msg:%+v\n", "write msg", time.Now().Unix(), "raft.node.Propose", string(data))
 	// for debug
@@ -497,13 +503,14 @@ func (n *node) stepWait(ctx context.Context, m pb.Message) error {
 
 // Step advances the state machine using msgs. The ctx.Err() will be returned,
 // if any.
-// 将数据写入了node对象？
+// 将数据写入了node对象
+// 将raftnode.propc数据写入到raftnode.node.propc
 func (n *node) stepWithWaitOption(ctx context.Context, m pb.Message, wait bool) error {
 	if m.Type != pb.MsgProp {
 		//todo 此处会循环执行，是有心跳？
 		//fmt.Printf("m.Type != pb.MsgProp\n")
 		select {
-		case n.recvc <- m:
+		case n.recvc <- m: // 数据写入到recvc
 			return nil
 		case <-ctx.Done():
 			return ctx.Err()
@@ -529,8 +536,8 @@ func (n *node) stepWithWaitOption(ctx context.Context, m pb.Message, wait bool) 
 	case <-n.done:
 		return ErrStopped
 	}
-	select { // 判断错误
-	case err := <-pm.result:
+	select { // 判断是否消费成功
+	case err := <-pm.result: // 数据消费的时候写入，当前文件的run方法
 		if err != nil {
 			return err
 		}

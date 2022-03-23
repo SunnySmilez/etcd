@@ -54,6 +54,7 @@ type Snapshotter struct {
 	dir string
 }
 
+// 实例化
 func New(lg *zap.Logger, dir string) *Snapshotter {
 	if lg == nil {
 		lg = zap.NewNop()
@@ -64,6 +65,7 @@ func New(lg *zap.Logger, dir string) *Snapshotter {
 	}
 }
 
+// 存储快照，并记录每个阶段花费的时间
 func (s *Snapshotter) SaveSnap(snapshot raftpb.Snapshot) error {
 	if raft.IsEmptySnap(snapshot) {
 		return nil
@@ -71,24 +73,25 @@ func (s *Snapshotter) SaveSnap(snapshot raftpb.Snapshot) error {
 	return s.save(&snapshot)
 }
 
+// 存储快照，并记录每个阶段花费的时间
 func (s *Snapshotter) save(snapshot *raftpb.Snapshot) error {
 	start := time.Now()
 
 	fname := fmt.Sprintf("%016x-%016x%s", snapshot.Metadata.Term, snapshot.Metadata.Index, snapSuffix)
 	fmt.Printf("role:snap fname:%s\n", fname)
-	b := pbutil.MustMarshal(snapshot)
+	b := pbutil.MustMarshal(snapshot) // marshal
 	crc := crc32.Update(0, crcTable, b)
 	snap := snappb.Snapshot{Crc: crc, Data: b}
-	d, err := snap.Marshal()
+	d, err := snap.Marshal() // 获取crc+data+XXX_unrecognized数据
 	if err != nil {
 		return err
 	}
-	snapMarshallingSec.Observe(time.Since(start).Seconds())
+	snapMarshallingSec.Observe(time.Since(start).Seconds()) // 记录耗费的时间
 
-	spath := filepath.Join(s.dir, fname)
+	spath := filepath.Join(s.dir, fname) // 获取snap路径
 	fmt.Printf("role:snap spath:%s\n", spath)
 	fsyncStart := time.Now()
-	err = pioutil.WriteAndSyncFile(spath, d, 0666)
+	err = pioutil.WriteAndSyncFile(spath, d, 0666) // 数据写入到文件
 	snapFsyncSec.Observe(time.Since(fsyncStart).Seconds())
 
 	if err != nil {
@@ -105,7 +108,7 @@ func (s *Snapshotter) save(snapshot *raftpb.Snapshot) error {
 }
 
 // Load returns the newest snapshot.
-func (s *Snapshotter) Load() (*raftpb.Snapshot, error) {
+func (s *Snapshotter) Load() (*raftpb.Snapshot, error) { // 加载最新的文件
 	return s.loadMatching(func(*raftpb.Snapshot) bool { return true })
 }
 
@@ -122,9 +125,10 @@ func (s *Snapshotter) LoadNewestAvailable(walSnaps []walpb.Snapshot) (*raftpb.Sn
 	})
 }
 
+// // 从文件读取数据，并存储到raftpb.Snapshot（需要是匹配到到文件，此处会遍历文件）
 // loadMatching returns the newest snapshot where matchFn returns true.
 func (s *Snapshotter) loadMatching(matchFn func(*raftpb.Snapshot) bool) (*raftpb.Snapshot, error) {
-	names, err := s.snapNames()
+	names, err := s.snapNames() // 获取所有的快照文件
 	if err != nil {
 		return nil, err
 	}
@@ -137,6 +141,7 @@ func (s *Snapshotter) loadMatching(matchFn func(*raftpb.Snapshot) bool) (*raftpb
 	return nil, ErrNoSnapshot
 }
 
+// 从文件读取数据，并存储到raftpb.Snapshot
 func loadSnap(lg *zap.Logger, dir, name string) (*raftpb.Snapshot, error) {
 	fpath := filepath.Join(dir, name)
 	snap, err := Read(lg, fpath)
@@ -158,9 +163,10 @@ func loadSnap(lg *zap.Logger, dir, name string) (*raftpb.Snapshot, error) {
 	return snap, err
 }
 
+// 从文件读取数据，并存储到raftpb.Snapshot
 // Read reads the snapshot named by snapname and returns the snapshot.
 func Read(lg *zap.Logger, snapname string) (*raftpb.Snapshot, error) {
-	b, err := os.ReadFile(snapname)
+	b, err := os.ReadFile(snapname) // 读取文件内容
 	if err != nil {
 		if lg != nil {
 			lg.Warn("failed to read a snap file", zap.String("path", snapname), zap.Error(err))
@@ -176,21 +182,21 @@ func Read(lg *zap.Logger, snapname string) (*raftpb.Snapshot, error) {
 	}
 
 	var serializedSnap snappb.Snapshot
-	if err = serializedSnap.Unmarshal(b); err != nil {
+	if err = serializedSnap.Unmarshal(b); err != nil { // 从byte中解析数据
 		if lg != nil {
 			lg.Warn("failed to unmarshal snappb.Snapshot", zap.String("path", snapname), zap.Error(err))
 		}
 		return nil, err
 	}
 
-	if len(serializedSnap.Data) == 0 || serializedSnap.Crc == 0 {
+	if len(serializedSnap.Data) == 0 || serializedSnap.Crc == 0 { // 判断数据是否存在
 		if lg != nil {
 			lg.Warn("failed to read empty snapshot data", zap.String("path", snapname))
 		}
 		return nil, ErrEmptySnapshot
 	}
 
-	crc := crc32.Update(0, crcTable, serializedSnap.Data)
+	crc := crc32.Update(0, crcTable, serializedSnap.Data) // 验证crc32是否匹配
 	if crc != serializedSnap.Crc {
 		if lg != nil {
 			lg.Warn("snap file is corrupt",
@@ -212,6 +218,7 @@ func Read(lg *zap.Logger, snapname string) (*raftpb.Snapshot, error) {
 	return &snap, nil
 }
 
+// 返回所有的快照文件
 // snapNames returns the filename of the snapshots in logical time order (from newest to oldest).
 // If there is no available snapshots, an ErrNoSnapshot will be returned.
 func (s *Snapshotter) snapNames() ([]string, error) {
@@ -236,6 +243,7 @@ func (s *Snapshotter) snapNames() ([]string, error) {
 	return snaps, nil
 }
 
+// 检验文件后缀
 func checkSuffix(lg *zap.Logger, names []string) []string {
 	snaps := []string{}
 	for i := range names {
@@ -254,6 +262,7 @@ func checkSuffix(lg *zap.Logger, names []string) []string {
 	return snaps
 }
 
+// 删除不正确的文件
 // cleanupSnapdir removes any files that should not be in the snapshot directory:
 // - db.tmp prefixed files that can be orphaned by defragmentation
 func (s *Snapshotter) cleanupSnapdir(filenames []string) (names []string, err error) {
@@ -271,6 +280,7 @@ func (s *Snapshotter) cleanupSnapdir(filenames []string) (names []string, err er
 	return names, nil
 }
 
+// 文件名有个转换方式，如果超过一定时间，就会删除备份数据
 func (s *Snapshotter) ReleaseSnapDBs(snap raftpb.Snapshot) error {
 	dir, err := os.Open(s.dir)
 	if err != nil {

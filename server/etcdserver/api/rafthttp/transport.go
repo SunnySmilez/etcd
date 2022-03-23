@@ -133,8 +133,9 @@ type Transport struct {
 	streamProber   probing.Prober
 }
 
+// 实例化stream,pipeline的roundTripper
+// 初始化两个探针
 func (t *Transport) Start() error {
-	// 实例化stream,pipeline的roundTripper
 	var err error
 	t.streamRt, err = newStreamRoundTripper(t.TLSInfo, t.DialTimeout)
 	if err != nil {

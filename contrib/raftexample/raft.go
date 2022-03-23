@@ -281,6 +281,9 @@ func (rc *raftNode) writeError(err error) {
 	rc.node.Stop()
 }
 
+// 初始化snapshotter
+// 初始化raft
+// 启动transport
 //
 func (rc *raftNode) startRaft() {
 	// 初始化snapshotter
@@ -334,6 +337,7 @@ func (rc *raftNode) startRaft() {
 		}
 	}
 
+	// 启动一个tcp的服务，使用transport中的函数做处理
 	go rc.serveRaft()
 	go rc.serveChannels()
 }
@@ -412,6 +416,7 @@ func (rc *raftNode) maybeTriggerSnapshot(applyDoneC <-chan struct{}) {
 	rc.snapshotIndex = rc.appliedIndex
 }
 
+// 处理http写入的数据
 // 做wal及snap等操作
 func (rc *raftNode) serveChannels() {
 	snap, err := rc.raftStorage.Snapshot()
@@ -439,7 +444,7 @@ func (rc *raftNode) serveChannels() {
 				} else {
 					// blocks until accepted by raft state machine
 					fmt.Printf("role:app-raft, get proposeC data:%+v\n", prop)
-					rc.node.Propose(context.TODO(), []byte(prop)) // 数据写入到节点中
+					rc.node.Propose(context.TODO(), []byte(prop)) // kv数据写入raftnode.propc,此时将对应数据进行传输写入raftnode.node.propc；数据写入到节点中
 				}
 
 			case cc, ok := <-rc.confChangeC: // 读取集群变更消息
@@ -448,7 +453,7 @@ func (rc *raftNode) serveChannels() {
 				} else {
 					confChangeCount++
 					cc.ID = confChangeCount
-					rc.node.ProposeConfChange(context.TODO(), cc)
+					rc.node.ProposeConfChange(context.TODO(), cc) // 处理配置文件变更的数据
 				}
 			}
 		}
@@ -464,6 +469,7 @@ func (rc *raftNode) serveChannels() {
 
 		// store raft entries to wal, then publish over commit channel
 		// todo MsgAppResp类型的数据从哪写入的？
+		// 最终消息的处理在这个位置
 		case rd := <-rc.node.Ready(): // node将数据写入到readyc后，这边读取数据
 			//if len(rd.Messages) != 0 && rd.Messages[0].Type != raftpb.MsgHeartbeat && rd.Messages[0].Type != raftpb.MsgHeartbeatResp {
 			//if len(rd.Messages) != 0 && rd.Messages[0].Type == raftpb.MsgProp {
@@ -474,7 +480,7 @@ func (rc *raftNode) serveChannels() {
 
 			// 写入wal文件(包含数据和state值)
 			rc.wal.Save(rd.HardState, rd.Entries)
-			// snap不存在，先写入snap
+			// snap存在，写入snap
 			if !raft.IsEmptySnap(rd.Snapshot) {
 				//fmt.Printf("process:%s, time:%+v, function:%+s, save Snapshot:%+v\n", "write msg", time.Now().UnixMicro(), "raft.serveChannels", rd)
 				if len(rd.Messages) >= 0 {
@@ -528,7 +534,8 @@ func (rc *raftNode) serveRaft() { //启动raft服务
 		log.Fatalf("raftexample: Failed to listen rafthttp (%v)", err)
 	}
 
-	err = (&http.Server{Handler: rc.transport.Handler()}).Serve(ln)
+	//todo 需要详细了解
+	err = (&http.Server{Handler: rc.transport.Handler()}).Serve(ln) // 使用transport对应方法处理请求，启动tcp的服务
 	select {
 	case <-rc.httpstopc:
 	default:

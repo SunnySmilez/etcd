@@ -19,6 +19,8 @@ import (
 	"go.etcd.io/etcd/raft/v3/tracker"
 )
 
+// slice转换为map，根据各种规则写入in和out
+// todo 具体用途还没搞清楚
 // toConfChangeSingle translates a conf state into 1) a slice of operations creating
 // first the config that will become the outgoing one, and then the incoming one, and
 // b) another slice that, when applied to the config resulted from 1), represents the
@@ -96,6 +98,7 @@ func toConfChangeSingle(cs pb.ConfState) (out []pb.ConfChangeSingle, in []pb.Con
 	return out, in
 }
 
+// 调用处理函数，得到对应的配置信息，写入到chg
 func chain(chg Changer, ops ...func(Changer) (tracker.Config, tracker.ProgressMap, error)) (tracker.Config, tracker.ProgressMap, error) {
 	for _, op := range ops {
 		cfg, prs, err := op(chg)
@@ -108,6 +111,8 @@ func chain(chg Changer, ops ...func(Changer) (tracker.Config, tracker.ProgressMa
 	return chg.Tracker.Config, chg.Tracker.Progress, nil
 }
 
+// 传入了各种处理函数
+// 调用处理函数，得到对应的配置信息，写入到chg
 // Restore takes a Changer (which must represent an empty configuration), and
 // runs a sequence of changes enacting the configuration described in the
 // ConfState.
@@ -125,6 +130,7 @@ func Restore(chg Changer, cs pb.ConfState) (tracker.Config, tracker.ProgressMap,
 		// No outgoing config, so just apply the incoming changes one by one.
 		for _, cc := range incoming {
 			cc := cc // loop-local copy
+			// 传入一个处理函数
 			ops = append(ops, func(chg Changer) (tracker.Config, tracker.ProgressMap, error) {
 				return chg.Simple(cc)
 			})
@@ -137,6 +143,7 @@ func Restore(chg Changer, cs pb.ConfState) (tracker.Config, tracker.ProgressMap,
 		// if the config is (1 2 3)&(2 3 4), this will establish (2 3 4)&().
 		for _, cc := range outgoing {
 			cc := cc // loop-local copy
+			// 传入一个处理函数
 			ops = append(ops, func(chg Changer) (tracker.Config, tracker.ProgressMap, error) {
 				return chg.Simple(cc)
 			})
@@ -151,5 +158,5 @@ func Restore(chg Changer, cs pb.ConfState) (tracker.Config, tracker.ProgressMap,
 		})
 	}
 
-	return chain(chg, ops...)
+	return chain(chg, ops...) // 调用处理函数，得到对应的配置信息，写入到chg
 }

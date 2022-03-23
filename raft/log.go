@@ -58,15 +58,15 @@ func newLogWithSize(storage Storage, logger Logger, maxNextEntsSize uint64) *raf
 		log.Panic("storage must not be nil")
 	}
 	log := &raftLog{
-		storage:         storage,
+		storage:         storage, // 存储的类型
 		logger:          logger,
 		maxNextEntsSize: maxNextEntsSize,
 	}
-	firstIndex, err := storage.FirstIndex()
+	firstIndex, err := storage.FirstIndex() //  获取第一条日志的索引
 	if err != nil {
 		panic(err) // TODO(bdarnell)
 	}
-	lastIndex, err := storage.LastIndex()
+	lastIndex, err := storage.LastIndex() // 获取最后一条日志的索引
 	if err != nil {
 		panic(err) // TODO(bdarnell)
 	}
