@@ -54,7 +54,7 @@ type pipeline struct {
 	// deprecate when we depercate v2 API
 	followerStats *stats.FollowerStats
 
-	msgc chan raftpb.Message
+	msgc chan raftpb.Message // 此处的消息在handle消费
 	// wait for the handling routines
 	wg    sync.WaitGroup
 	stopc chan struct{}
@@ -92,6 +92,7 @@ func (p *pipeline) stop() {
 }
 
 // 处理pipeline消息
+// 消费transport.Send->peer.send->pipeline.msgc写入的数据
 func (p *pipeline) handle() {
 	defer p.wg.Done()
 
@@ -99,7 +100,7 @@ func (p *pipeline) handle() {
 		select {
 		case m := <-p.msgc:
 			start := time.Now()
-			// 发送消息
+			// 发送消息到远端
 			err := p.post(pbutil.MustMarshal(&m))
 			end := time.Now()
 

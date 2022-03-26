@@ -259,7 +259,7 @@ func (p *peer) send(m raftpb.Message) {
 		return
 	}
 
-	// 根据消息类型选择chan及返回名称
+	// 根据消息类型选择chan及返回名称(消息写入pipeline.msgc)
 	writec, name := p.pick(m)
 	select {
 	case writec <- m:
