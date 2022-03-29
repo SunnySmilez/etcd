@@ -293,6 +293,7 @@ func (p *peer) send(m raftpb.Message) {
 }
 
 // 发送snap请求
+// 单独起一个协程完成快照数据发送
 func (p *peer) sendSnap(m snap.Message) {
 	go p.snapSender.send(m)
 }

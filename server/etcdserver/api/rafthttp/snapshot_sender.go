@@ -37,13 +37,13 @@ var (
 )
 
 type snapshotSender struct {
-	from, to types.ID
-	cid      types.ID
+	from, to types.ID //记录当 节点的 ID 及对端节点 ID
+	cid      types.ID // 记录当前集群id
 
-	tr     *Transport
-	picker *urlPicker
+	tr     *Transport //关联的transport实例
+	picker *urlPicker //负责获取对端节 可用的 URL 地址
 	status *peerStatus
-	r      Raft
+	r      Raft // raft状态机
 	errorc chan error
 
 	stopc chan struct{}
@@ -72,10 +72,11 @@ func (s *snapshotSender) send(merged snap.Message) {
 	m := merged.Message
 	to := types.ID(m.To).String()
 
-	body := createSnapBody(s.tr.Logger, merged)
+	body := createSnapBody(s.tr.Logger, merged) // 根据message创建body
 	defer body.Close()
 
-	u := s.picker.pick()
+	u := s.picker.pick() //选择对端的url
+	//／ 注意这里请求的路径是 /raft/snapshot 而pipeline发出的请求路径是/raft
 	// 创建post请求
 	req := createPostRequest(s.tr.Logger, u, RaftSnapshotPrefix, body, "application/octet-stream", s.tr.URLs, s.from, s.cid)
 
@@ -118,17 +119,17 @@ func (s *snapshotSender) send(merged snap.Message) {
 
 		s.picker.unreachable(u)
 		s.status.deactivate(failureType{source: sendSnap, action: "post"}, err.Error())
-		s.r.ReportUnreachable(m.To)
+		s.r.ReportUnreachable(m.To) // 通知底层etcd-raft模块对端不可达
 		// report SnapshotFailure to raft state machine. After raft state
 		// machine knows about it, it would pause a while and retry sending
 		// new snapshot message.
-		s.r.ReportSnapshot(m.To, raft.SnapshotFailure)
+		s.r.ReportSnapshot(m.To, raft.SnapshotFailure) // 消息发送信息通知etcd-raft
 		sentFailures.WithLabelValues(to).Inc()
 		snapshotSendFailures.WithLabelValues(to).Inc()
 		return
 	}
 	s.status.activate()
-	s.r.ReportSnapshot(m.To, raft.SnapshotFinish)
+	s.r.ReportSnapshot(m.To, raft.SnapshotFinish) // 消息发送完成
 
 	if s.tr.Logger != nil {
 		s.tr.Logger.Info(
@@ -159,10 +160,10 @@ func (s *snapshotSender) post(req *http.Request) (err error) {
 	}
 	result := make(chan responseAndError, 1)
 
-	go func() {
+	go func() { //开协程发送数据及获取相应
 		// roundTrip发送消息
-		resp, err := s.tr.pipelineRt.RoundTrip(req)
-		if err != nil {
+		resp, err := s.tr.pipelineRt.RoundTrip(req) //发送请求
+		if err != nil {                             //异常写入channel
 			result <- responseAndError{resp, nil, err}
 			return
 		}
@@ -170,15 +171,16 @@ func (s *snapshotSender) post(req *http.Request) (err error) {
 		// close the response body when timeouts.
 		// prevents from reading the body forever when the other side dies right after
 		// successfully receives the request body.
+		// 超时处理
 		time.AfterFunc(snapResponseReadTimeout, func() { httputil.GracefulClose(resp) })
-		body, err := io.ReadAll(resp.Body)
-		result <- responseAndError{resp, body, err}
+		body, err := io.ReadAll(resp.Body)          // 获取相应数据
+		result <- responseAndError{resp, body, err} // 相应数据写入channel
 	}()
 
 	select {
 	case <-s.stopc:
 		return errStopped
-	case r := <-result:
+	case r := <-result: // 处理相应消息
 		if r.err != nil {
 			return r.err
 		}
