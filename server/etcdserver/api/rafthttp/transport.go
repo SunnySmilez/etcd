@@ -182,7 +182,7 @@ func (t *Transport) Get(id types.ID) Peer {
 
 // raft node之间的数据交互
 func (t *Transport) Send(msgs []raftpb.Message) {
-	for _, m := range msgs {
+	for _, m := range msgs { // 此处会给多个短发送消息
 		if m.Type == raftpb.MsgProp {
 			fmt.Printf("role:transport msg content %+v\n", m)
 			//fmt.Printf("process:%s, time:%+v, function:%+s, send to node:%+v\n", "write msg", time.Now().Unix(), "server.etcdserver.api.rafthttp.transport.send", m)

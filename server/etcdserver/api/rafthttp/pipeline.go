@@ -94,6 +94,7 @@ func (p *pipeline) stop() {
 }
 
 // 处理pipeline消息
+// 消费transport.Send->peer.send->pipeline.msgc写入的数据
 func (p *pipeline) handle() {
 	defer p.wg.Done()
 
@@ -101,7 +102,7 @@ func (p *pipeline) handle() {
 		select {
 		case m := <-p.msgc: //获取待发送的 MsgSnap 类型的 Message
 			start := time.Now()
-			// 发送消息
+			// 发送消息到远端
 			err := p.post(pbutil.MustMarshal(&m)) //消息序列化，然后创建 HTTP 请求并发送出去
 			end := time.Now()
 
