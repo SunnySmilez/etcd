@@ -65,6 +65,11 @@ var (
 	}
 )
 
+// stream 消息通道维护的http长连接，主要负责传输数据量比较小，发送比较频繁的消息
+// 例如MsgApp，MsgHeartbeat，MsgVote
+// 节点启动后，主动与其他节点建立连接
+// 每个stream有两个关联的goroutine，一个用于建立关联的http连接，并从连接上读取数据，然后将读取到的数据反序列化成messsage实例，传递给etcd-raft模块处理
+// 读取etcd-raft模块返回的消息并序列化，最后写入stream通道
 type streamType string
 
 // 不同类型定义不同路径
@@ -122,18 +127,18 @@ type streamWriter struct {
 	lg *zap.Logger //日志组件
 
 	localID types.ID
-	peerID  types.ID
+	peerID  types.ID //对端节点的 ID
 
 	status *peerStatus
 	fs     *stats.FollowerStats // raft follower节点的各种统计信息
 	r      Raft                 //raft实例
 
 	mu      sync.Mutex // guard field working and closer
-	closer  io.Closer
-	working bool
+	closer  io.Closer  //负责关闭底层的长连接
+	working bool       //负责标识当 前的 streamWriter 是否可用( 底层是 否关联了 相应 的网络连接)。
 
-	msgc  chan raftpb.Message //写入的msg信息
-	connc chan *outgoingConn  // 连接的信息
+	msgc  chan raftpb.Message //写入的msg信息 Peer会将待发送的消息写入该通道， streamWriter则从该通道中读取消息并发送出去
+	connc chan *outgoingConn  // 连接的信息 获取当前 streamWriter 实例关联的底 层网络连接
 	stopc chan struct{}
 	done  chan struct{}
 }
@@ -164,15 +169,15 @@ func startStreamWriter(lg *zap.Logger, local, id types.ID, status *peerStatus, f
 func (cw *streamWriter) run() {
 	var (
 		msgc       chan raftpb.Message
-		heartbeatc <-chan time.Time
+		heartbeatc <-chan time.Time // 该心跳消息的主要目的是为了防止连接长时间不用断升的
 		t          streamType
 		enc        encoder      // 编码器，负责将消息序列化并将数据写入连接的缓冲区
-		flusher    http.Flusher // 将数据发送出去
-		batched    int          // 当前未flush出去的数据
+		flusher    http.Flusher // 负责刷新得层连接，将数据发送出去
+		batched    int          // 当前未flush出去的数据个数
 	)
 	tickc := time.NewTicker(ConnReadTimeout / 3)
 	defer tickc.Stop()
-	unflushed := 0
+	unflushed := 0 // 未flush的字节数
 
 	if cw.lg != nil {
 		cw.lg.Info(
@@ -186,8 +191,8 @@ func (cw *streamWriter) run() {
 		select {
 		case <-heartbeatc: //处理心跳（处理各种统计数目）
 			err := enc.encode(&linkHeartbeatMessage) //编码
-			unflushed += linkHeartbeatMessage.Size()
-			if err == nil {
+			unflushed += linkHeartbeatMessage.Size() //增加未 Flush 出去的字节数
+			if err == nil {                          // flush消息之后，重置batched和unflushed
 				flusher.Flush() //刷数据
 				batched = 0
 				sentBytes.WithLabelValues(cw.peerID.String()).Add(float64(unflushed)) // 统计数目，用id做key；The total number of bytes sent to peers.
@@ -195,6 +200,7 @@ func (cw *streamWriter) run() {
 				continue
 			}
 
+			// 发生异常的处理逻辑
 			cw.status.deactivate(failureType{source: t.String(), action: "heartbeat"}, err.Error())
 
 			sentFailures.WithLabelValues(cw.peerID.String()).Inc()
@@ -220,7 +226,7 @@ func (cw *streamWriter) run() {
 			if err == nil {
 				unflushed += m.Size()
 
-				if len(msgc) == 0 || batched > streamBufSize/2 { //批量flush的条件
+				if len(msgc) == 0 || batched > streamBufSize/2 { //批量flush的条件：msgc 通道中的消息全部发送完成或是未 Flush 的消息较多，则触发 Flush
 					//if m.Type == raftpb.MsgProp {
 					//fmt.Printf("process:%s, time:%+v, function:%+s, flush data from cache:%+v\n", "write msg", time.Now().Unix(), "server.etcdserver.api.rafthttp.stream.(streamWriter)Run()", m)
 					//}
@@ -278,7 +284,7 @@ func (cw *streamWriter) run() {
 			unflushed = 0
 			cw.status.activate()
 			cw.closer = conn.Closer
-			cw.working = true
+			cw.working = true //标识当前 streamWriter 正在运行
 			cw.mu.Unlock()
 
 			if closed {
@@ -379,20 +385,20 @@ type streamReader struct {
 	lg *zap.Logger
 
 	peerID types.ID
-	typ    streamType
+	typ    streamType //关联 的底 层连接使用的协议版本信息
 
-	tr     *Transport
-	picker *urlPicker
+	tr     *Transport //关联的 raft.Transport实例
+	picker *urlPicker //用于获取对端节点的可用的 URL
 	status *peerStatus
-	recvc  chan<- raftpb.Message
-	propc  chan<- raftpb.Message
+	recvc  chan<- raftpb.Message //创建streamReader 实例时是使用 peer.reeve 通道初始化该宇段的，其中还会启动一个后台 goroutine 从 peer.reeve 通道中读取消息。在下面分析中会看到，从对端节点发送来的 非 MsgProp 类型 的消 息会首 先由 streamReader 写入 reeve 通道 中， 然后由 peer.start() 启动的后台 goroutine读取出来， 交由底层的 eted-raft模块进行处理
+	propc  chan<- raftpb.Message //接收prop类型消息
 
 	rl *rate.Limiter // alters the frequency of dial retrial attempts
 
 	errorc chan<- error
 
 	mu     sync.Mutex
-	paused bool
+	paused bool // 是否暂停读取数据
 	closer io.Closer
 
 	ctx    context.Context
@@ -454,6 +460,7 @@ func (cr *streamReader) run() {
 			// all data is read out
 			case err == io.EOF:
 			// connection is closed by the remote
+			//出可能是对端主动关闭连接，此时需要等待 lOOms后再创建新连接 ，这主妾是为 了 防止频繁重试
 			case transport.IsClosedConnError(err):
 			default:
 				cr.status.deactivate(failureType{source: t.String(), action: "read"}, err.Error())
@@ -537,6 +544,7 @@ func (cr *streamReader) decodeLoop(rc io.ReadCloser, t streamType) error {
 			continue
 		}
 
+		//忽略连接层的心跳消息
 		if isLinkHeartbeatMessage(&m) {
 			// raft is not interested in link layer
 			// heartbeat message, so we should ignore
@@ -551,7 +559,7 @@ func (cr *streamReader) decodeLoop(rc io.ReadCloser, t streamType) error {
 		}
 
 		select {
-		case recvc <- m: //数据写入streamReader.recvs/streamReader.propc
+		case recvc <- m: //数据写入streamReader.recvs/streamReader.propc;交给底层raft状态机处理
 		default:
 			if cr.status.isActive() {
 				if cr.lg != nil {
@@ -589,10 +597,11 @@ func (cr *streamReader) stop() {
 	<-cr.done
 }
 
-// 读取数据
+// 建立连接，读取数据
 func (cr *streamReader) dial(t streamType) (io.ReadCloser, error) {
-	u := cr.picker.pick()
+	u := cr.picker.pick() //获取对端节点暴露的一个URL
 	uu := u
+	//根据使用协议的版本和节点 ID创建最终的 URL地址
 	uu.Path = path.Join(t.endpoint(cr.lg), cr.tr.ID.String()) //定义数据目录"/stream/msgapp/id2string"
 
 	if cr.lg != nil {

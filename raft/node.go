@@ -66,24 +66,29 @@ type Ready struct {
 	// when its applied index is greater than the index in ReadState.
 	// Note that the readState will be returned when raft receives msgReadIndex.
 	// The returned is only valid for the request that requested to read.
+	// 当前节点中等待处理的读请求
 	ReadStates []ReadState
 
 	// Entries specifies entries to be saved to stable storage BEFORE
 	// Messages are sent.
+	// 从unstable读取，上层应用会将数据存储到storage
 	Entries []pb.Entry
 
 	// Snapshot specifies the snapshot to be saved to stable storage.
+	// 待持久化的数据
 	Snapshot pb.Snapshot
 
 	// CommittedEntries specifies entries to be committed to a
 	// store/state-machine. These have previously been committed to stable
 	// store.
+	// 已提交待应用的entry，数据已存储到storage
 	CommittedEntries []pb.Entry
 
 	// Messages specifies outbound messages to be sent AFTER Entries are
 	// committed to stable storage.
 	// If it contains a MsgSnap message, the application MUST report back to raft
 	// when the snapshot has been received or has failed by calling ReportSnapshot.
+	// 待发送到其他节点到信息
 	Messages []pb.Message
 
 	// MustSync indicates whether the HardState and Entries must be synchronously
@@ -158,6 +163,7 @@ type Node interface {
 	//
 	// NOTE: No committed entries from the next Ready may be applied until all committed entries
 	// and snapshots from the previous one have finished.
+	// Ready数据是只读，只用来传递数据
 	Ready() <-chan Ready
 
 	// Advance notifies the Node that the application has saved progress up to the last Ready.
@@ -261,12 +267,12 @@ type msgWithResult struct {
 
 // node is the canonical implementation of the Node interface
 type node struct {
-	propc      chan msgWithResult
-	recvc      chan pb.Message
-	confc      chan pb.ConfChangeV2
-	confstatec chan pb.ConfState
-	readyc     chan Ready
-	advancec   chan struct{}
+	propc      chan msgWithResult   // 接收 MsgProp 类型的消息
+	recvc      chan pb.Message      //除 MsgProp 外的其他类型的消息都是由该通道接收的
+	confc      chan pb.ConfChangeV2 //当节点收到 Entry ConfChange 类型的 Entry 记录 时，会转换成 ConfChange，井写入该通道中等待处理
+	confstatec chan pb.ConfState    //在 ConfState 中封装了当前集群 中所有节点的 ID，该通道用于向上层模块返回 ConfState实例。
+	readyc     chan Ready           //向上层模块返回 Ready 实例
+	advancec   chan struct{}        //当上层模块处理完通过上述 readyc 通道获取到的 Ready 实例之后，会通过 node.Advance()方法向该通道写入信号 ，从而通知底 层 raft 实例
 	tickc      chan struct{}
 	done       chan struct{}
 	stop       chan struct{}

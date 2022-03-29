@@ -35,42 +35,42 @@ import (
 )
 
 type Raft interface {
-	Process(ctx context.Context, m raftpb.Message) error
-	IsIDRemoved(id uint64) bool
-	ReportUnreachable(id uint64)
-	ReportSnapshot(id uint64, status raft.SnapshotStatus)
+	Process(ctx context.Context, m raftpb.Message) error  //将指定消息实例传递给底层的etcd-raft模块进行处理
+	IsIDRemoved(id uint64) bool                           // 监测指定节点是否从当前集群中移出
+	ReportUnreachable(id uint64)                          // 通知底层etcd-raft模块，当前节点与指定节点无法连接
+	ReportSnapshot(id uint64, status raft.SnapshotStatus) // 通知底层etcd-raft模块，快照数据是否发送成功
 }
 
 type Transporter interface {
 	// Start starts the given Transporter.
 	// Start MUST be called before calling other functions in the interface.
-	Start() error
+	Start() error // 初始化操作
 	// Handler returns the HTTP handler of the transporter.
 	// A transporter HTTP handler handles the HTTP requests
 	// from remote peers.
 	// The handler MUST be used to handle RaftPrefix(/raft)
 	// endpoint.
-	Handler() http.Handler
+	Handler() http.Handler // 创建handler实例，关联到指定url上
 	// Send sends out the given messages to the remote peers.
 	// Each message has a To field, which is an id that maps
 	// to an existing peer in the transport.
 	// If the id cannot be found in the transport, the message
 	// will be ignored.
-	Send(m []raftpb.Message)
+	Send(m []raftpb.Message) //发送消息
 	// SendSnapshot sends out the given snapshot message to a remote peer.
 	// The behavior of SendSnapshot is similar to Send.
-	SendSnapshot(m snap.Message)
+	SendSnapshot(m snap.Message) //发送快照数据
 	// AddRemote adds a remote with given peer urls into the transport.
 	// A remote helps newly joined member to catch up the progress of cluster,
 	// and will not be used after that.
 	// It is the caller's responsibility to ensure the urls are all valid,
 	// or it panics.
-	AddRemote(id types.ID, urls []string)
+	AddRemote(id types.ID, urls []string) //在集群中添加一个节点时，其他节点会通过该方法添加该新加入节点的信息
 	// AddPeer adds a peer with given peer urls into the transport.
 	// It is the caller's responsibility to ensure the urls are all valid,
 	// or it panics.
 	// Peer urls are used to connect to the remote peer.
-	AddPeer(id types.ID, urls []string)
+	AddPeer(id types.ID, urls []string) //peer接口是当前节点对集群中其他节点的抽象表示，而结构体peer则是peer接口的一个具体实现
 	// RemovePeer removes the peer with given id.
 	RemovePeer(id types.ID)
 	// RemoveAllPeers removes all the existing peers in the transport.
@@ -107,11 +107,11 @@ type Transport struct {
 
 	TLSInfo transport.TLSInfo // TLS information used when creating connection
 
-	ID          types.ID   // local member ID
-	URLs        types.URLs // local peer URLs
-	ClusterID   types.ID   // raft cluster ID for request validation
-	Raft        Raft       // raft state machine, to which the Transport forwards received messages and reports status
-	Snapshotter *snap.Snapshotter
+	ID          types.ID           // local member ID 当前节点的id
+	URLs        types.URLs         // local peer URLs 当前节点与集群中其他节点交互时使用的url地址
+	ClusterID   types.ID           // raft cluster ID for request validation 当前节点坐在的集群的ID
+	Raft        Raft               // raft state machine, to which the Transport forwards received messages and reports status 底层封装etcd-raft模块，当rafthttp.transport收到消息后，将其交给raft实例处理
+	Snapshotter *snap.Snapshotter  // 负责管理快照文件
 	ServerStats *stats.ServerStats // used to record general transportation statistics
 	// used to record transportation statistics with followers when
 	// performing as leader in raft protocol
@@ -122,31 +122,32 @@ type Transport struct {
 	// machine and thus stop the Transport.
 	ErrorC chan error
 
-	streamRt   http.RoundTripper // roundTripper used by streams
-	pipelineRt http.RoundTripper // roundTripper used by pipelines
+	streamRt   http.RoundTripper // roundTripper used by streams stream消息通道中使用的http.RoundTripper实例
+	pipelineRt http.RoundTripper // roundTripper used by pipelines pipeline消息通道中使用的http.RoundTripper实例
 
 	mu      sync.RWMutex         // protect the remote and peer map
-	remotes map[types.ID]*remote // remotes map that helps newly joined member to catch up
-	peers   map[types.ID]Peer    // peers map
+	remotes map[types.ID]*remote // remotes map that helps newly joined member to catch up 封装了pipeline实例，remote主要负责发送快照数据，帮助新加入的节点快速追赶上其他节点的数据
+	peers   map[types.ID]Peer    // peers map 当前节点对集群中其他节点的抽象标识
 
-	pipelineProber probing.Prober
-	streamProber   probing.Prober
+	pipelineProber probing.Prober // 用于探测pipeline是否可用
+	streamProber   probing.Prober // 用于探测stream是否可用
 }
 
 // 实例化stream,pipeline的roundTripper
 // 初始化两个探针
 func (t *Transport) Start() error {
 	var err error
-	t.streamRt, err = newStreamRoundTripper(t.TLSInfo, t.DialTimeout)
+	t.streamRt, err = newStreamRoundTripper(t.TLSInfo, t.DialTimeout) //设置：创建连接的超时时间，读写请求的超时时间和keepalive时间
 	if err != nil {
 		return err
 	}
-	t.pipelineRt, err = NewRoundTripper(t.TLSInfo, t.DialTimeout)
+	t.pipelineRt, err = NewRoundTripper(t.TLSInfo, t.DialTimeout) // 请求超时时间设置永不过期
 	if err != nil {
 		return err
 	}
 	t.remotes = make(map[types.ID]*remote)
 	t.peers = make(map[types.ID]Peer)
+	// 探活
 	t.pipelineProber = probing.NewProber(t.pipelineRt)
 	t.streamProber = probing.NewProber(t.streamRt)
 
@@ -159,7 +160,7 @@ func (t *Transport) Start() error {
 	return nil
 }
 
-// 实例化http的连接（pipieline，stream方式，snapShot）
+// 实例化http的连接（pipieline，stream方式，snapShot），并注册到指定的路径
 func (t *Transport) Handler() http.Handler {
 	pipelineHandler := newPipelineHandler(t, t.Raft, t.ClusterID)
 	streamHandler := newStreamHandler(t, t, t.Raft, t.ID, t.ClusterID)
@@ -200,7 +201,7 @@ func (t *Transport) Send(msgs []raftpb.Message) {
 		g, rok := t.remotes[to] // 获取remote信息
 		t.mu.RUnlock()
 
-		if pok {
+		if pok { // 存在对应的peer实例，使用peer发送消息
 			if m.Type == raftpb.MsgApp { // leader发送的消息
 				t.ServerStats.SendAppendReq(m.Size())
 			}
@@ -217,7 +218,7 @@ func (t *Transport) Send(msgs []raftpb.Message) {
 			continue
 		}
 
-		if rok {
+		if rok { // 指定节点id不存在对应的peer实例，则尝试使用查找对应的remote实例
 			if m.Type == raftpb.MsgProp {
 				fmt.Printf("role:transport remote send remote %+v\n", g)
 			}
@@ -342,7 +343,8 @@ func (t *Transport) AddPeer(id types.ID, us []string) {
 		}
 	}
 	fs := t.LeaderStats.Follower(id.String())
-	t.peers[id] = startPeer(t, urls, id, fs)
+	t.peers[id] = startPeer(t, urls, id, fs) //创建指定节点对应的peer实例
+	// 每隔一段时间发送探测消息，检测对端的监控情况
 	addPeerToProber(t.Logger, t.pipelineProber, id.String(), us, RoundTripperNameSnapshot, rttSec)
 	addPeerToProber(t.Logger, t.streamProber, id.String(), us, RoundTripperNameRaftMessage, rttSec)
 
@@ -382,6 +384,7 @@ func (t *Transport) removePeer(id types.ID) {
 	}
 	delete(t.peers, id)
 	delete(t.LeaderStats.Followers, id.String())
+	// 删除探测消息
 	t.pipelineProber.Remove(id.String())
 	t.streamProber.Remove(id.String())
 

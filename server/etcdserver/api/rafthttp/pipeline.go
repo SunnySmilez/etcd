@@ -43,20 +43,22 @@ const (
 
 var errStopped = errors.New("stopped")
 
+// 消息通道在传输数据完成后立即关闭连接，主要负责传输数据量较大，发送频率较低的消息
+// 例如MsgSnap消息
 type pipeline struct {
-	peerID types.ID
+	peerID types.ID //该 pipeline对应节点的 ID
 
-	tr     *Transport
+	tr     *Transport //关联的 ra他ttp.Transport实例
 	picker *urlPicker
 	status *peerStatus
-	raft   Raft
+	raft   Raft //底层raft实例
 	errorc chan error
 	// deprecate when we depercate v2 API
 	followerStats *stats.FollowerStats
 
-	msgc chan raftpb.Message
+	msgc chan raftpb.Message // pipeline实例从该通道中获取发送的消息
 	// wait for the handling routines
-	wg    sync.WaitGroup
+	wg    sync.WaitGroup // 负责同步多个goroutine结束。每个pipeline实例会启动 多个后台 goroutine (默认值是 4 个) 来处理 msgc 通道中的消息，在 pipeline.stop()方 法中 必须等待这些 goroutine都结束(通过 wg.Wait()方法实现)，才能真正关闭该 pipeline 实例。
 	stopc chan struct{}
 }
 
@@ -64,8 +66,8 @@ type pipeline struct {
 func (p *pipeline) start() {
 	p.stopc = make(chan struct{})
 	p.msgc = make(chan raftpb.Message, pipelineBufSize)
-	p.wg.Add(connPerPipeline)
-	for i := 0; i < connPerPipeline; i++ {
+	p.wg.Add(connPerPipeline)              //初始化sync.WaitGroup
+	for i := 0; i < connPerPipeline; i++ { // 启动多个协程处理消息
 		go p.handle()
 	}
 
@@ -80,7 +82,7 @@ func (p *pipeline) start() {
 
 func (p *pipeline) stop() {
 	close(p.stopc)
-	p.wg.Wait()
+	p.wg.Wait() // 等待多个协程都处理完毕
 
 	if p.tr != nil && p.tr.Logger != nil {
 		p.tr.Logger.Info(
@@ -97,10 +99,10 @@ func (p *pipeline) handle() {
 
 	for {
 		select {
-		case m := <-p.msgc:
+		case m := <-p.msgc: //获取待发送的 MsgSnap 类型的 Message
 			start := time.Now()
 			// 发送消息
-			err := p.post(pbutil.MustMarshal(&m))
+			err := p.post(pbutil.MustMarshal(&m)) //消息序列化，然后创建 HTTP 请求并发送出去
 			end := time.Now()
 
 			//记录成功失败信息
@@ -110,6 +112,7 @@ func (p *pipeline) handle() {
 				if m.Type == raftpb.MsgApp && p.followerStats != nil {
 					p.followerStats.Fail()
 				}
+				//向底层的 Raft 状态机报告失败信息
 				p.raft.ReportUnreachable(m.To)
 				if isMsgSnap(m) {
 					p.raft.ReportSnapshot(m.To, raft.SnapshotFailure) //记录snapshot失败
@@ -122,7 +125,7 @@ func (p *pipeline) handle() {
 			if m.Type == raftpb.MsgApp && p.followerStats != nil {
 				p.followerStats.Succ(end.Sub(start))
 			}
-			if isMsgSnap(m) {
+			if isMsgSnap(m) { //向底层的 Raft 状态机报告发送成功的信息
 				p.raft.ReportSnapshot(m.To, raft.SnapshotFinish)
 			}
 			sentBytes.WithLabelValues(types.ID(m.To).String()).Add(float64(m.Size()))
@@ -139,10 +142,10 @@ func (p *pipeline) post(data []byte) (err error) {
 	// 创建post请求
 	req := createPostRequest(p.tr.Logger, u, RaftPrefix, bytes.NewBuffer(data), "application/protobuf", p.tr.URLs, p.tr.ID, p.tr.ClusterID)
 
-	done := make(chan struct{}, 1)
+	done := make(chan struct{}, 1) //主妥用于通知下面的 goroutine请求是否已经发送完成
 	ctx, cancel := context.WithCancel(context.Background())
 	req = req.WithContext(ctx)
-	go func() {
+	go func() { //该 goroutine 主妥用 于监听请求是否需妥取消
 		select {
 		case <-done:
 			cancel()
@@ -160,9 +163,9 @@ func (p *pipeline) post(data []byte) (err error) {
 		return err
 	}
 	defer resp.Body.Close()
-	b, err := io.ReadAll(resp.Body)
+	b, err := io.ReadAll(resp.Body) // 读取响应的body内容
 	if err != nil {
-		p.picker.unreachable(u)
+		p.picker.unreachable(u) // 出现异常，则将该url标识不可用，在尝试其他url地址
 		return err
 	}
 
