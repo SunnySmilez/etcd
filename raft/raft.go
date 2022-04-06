@@ -523,6 +523,7 @@ func (r *raft) maybeSendAppend(to uint64, sendIfEmpty bool) bool {
 				r.logger.Panicf("%x is sending append in unhandled state %s", r.id, pr.State)
 			}
 		}
+		fmt.Printf("here,%+v\n\n\n", m)
 	}
 
 	/*if m.Type == pb.MsgProp {
@@ -960,7 +961,8 @@ func (r *raft) Step(m pb.Message) error {
 			// with "pb.MsgAppResp" of higher term would force leader to step down.
 			// However, this disruption is inevitable to free this stuck node with
 			// fresh election. This can be prevented with Pre-Vote phase.
-			r.send(pb.Message{To: m.From, Type: pb.MsgAppResp})
+			r.send(pb.Message{To: m.From, Type: pb.MsgAppResp}) // 此处会把MsgApp的类型定义为MsgAppResp类型
+			fmt.Printf("MsgApp->MsgAppResp\n\n")
 		} else if m.Type == pb.MsgPreVote {
 			// Before Pre-Vote enable, there may have candidate with higher term,
 			// but less log. After update to Pre-Vote, the cluster may deadlock if
