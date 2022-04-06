@@ -68,9 +68,9 @@ type writerToResponse interface {
 type pipelineHandler struct {
 	lg      *zap.Logger
 	localID types.ID
-	tr      Transporter
+	tr      Transporter // 关联的rafthttp.Transport实例
 	r       Raft
-	cid     types.ID
+	cid     types.ID // 当前集群id
 }
 
 // 实例化pipeline
@@ -114,8 +114,10 @@ func (h *pipelineHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// 限制总量读取数据
 	// Limit the data size that could be read from the request body, which ensures that read from
 	// connection will not time out accidentally due to possible blocking in underlying implementation.
+	//限制每次从底层连接读取的字节数上限，默认是 64KB ，因为快照数据可能非常大，为防止读取超时
+	//只能每次读取 部分数据到缓冲区中，最后将全部数据拼接起来，得到完整的快照数据
 	limitedr := pioutil.NewLimitedBufferReader(r.Body, connReadLimitByte)
-	b, err := io.ReadAll(limitedr)
+	b, err := io.ReadAll(limitedr) // 读取http body请求的数据
 	if err != nil {
 		h.lg.Warn(
 			"failed to read Raft message",
@@ -141,7 +143,7 @@ func (h *pipelineHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	receivedBytes.WithLabelValues(types.ID(m.From).String()).Add(float64(len(b)))
 
-	if err := h.r.Process(context.TODO(), m); err != nil { // 发起raft请求
+	if err := h.r.Process(context.TODO(), m); err != nil { // 发起raft请求，数据交给raft状态机处理
 		switch v := err.(type) {
 		case writerToResponse:
 			v.WriteTo(w)
@@ -161,14 +163,14 @@ func (h *pipelineHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// Write StatusNoContent header after the message has been processed by
 	// raft, which facilitates the client to report MsgSnap status.
-	w.WriteHeader(http.StatusNoContent)
+	w.WriteHeader(http.StatusNoContent) // 向对端节点返回合适的状态码 表示请求已经被处理
 }
 
 type snapshotHandler struct {
 	lg          *zap.Logger
 	tr          Transporter
 	r           Raft
-	snapshotter *snap.Snapshotter
+	snapshotter *snap.Snapshotter //负责将快照数据保存到本地文件中
 
 	localID types.ID
 	cid     types.ID
@@ -223,6 +225,8 @@ func (h *snapshotHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	dec := &messageDecoder{r: r.Body}
 	// let snapshots be very large since they can exceed 512MB for large installations
+	//限制每次从底层连接读取的字节数上线，默认64KB ，因为快照数据可能非常大，为了防止读取超时
+	//只能每次读取一部分数据到缓冲区中， 最后将全部数据拼接起来得到完整的快照数据
 	m, err := dec.decodeLimit(snapshotLimitByte)
 	from := types.ID(m.From).String()
 	if err != nil {
@@ -269,6 +273,7 @@ func (h *snapshotHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	)
 
 	// 数据存储到db文件
+	// 存储快照数据到本地文件中
 	// save incoming database snapshot.
 	n, err := h.snapshotter.SaveDBFrom(r.Body, m.Snapshot.Metadata.Index)
 	if err != nil {
@@ -329,11 +334,11 @@ func (h *snapshotHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 type streamHandler struct {
 	lg         *zap.Logger
-	tr         *Transport
-	peerGetter peerGetter
-	r          Raft
-	id         types.ID
-	cid        types.ID
+	tr         *Transport // 关联的http.transport
+	peerGetter peerGetter // 获取指定节点id对应的peer实例
+	r          Raft       // 底层raft
+	id         types.ID   // 节点id
+	cid        types.ID   // 集群id
 }
 
 func newStreamHandler(t *Transport, pg peerGetter, r Raft, id, cid types.ID) http.Handler {
@@ -369,6 +374,7 @@ func (h *streamHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var t streamType
+	// 确认消息版本
 	switch path.Dir(r.URL.Path) {
 	case streamTypeMsgAppV2.endpoint(h.lg):
 		t = streamTypeMsgAppV2
@@ -385,6 +391,7 @@ func (h *streamHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	//获取对端节点id
 	fromStr := path.Base(r.URL.Path)
 	from, err := types.IDFromString(fromStr)
 	if err != nil {
@@ -408,7 +415,7 @@ func (h *streamHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "removed member", http.StatusGone)
 		return
 	}
-	p := h.peerGetter.Get(from)
+	p := h.peerGetter.Get(from) // 获取对端节点对应的peer实例
 	if p == nil {
 		// This may happen in following cases:
 		// 1. user starts a remote peer that belongs to a different cluster
@@ -429,7 +436,7 @@ func (h *streamHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	wto := h.id.String()
+	wto := h.id.String() // 当前节点id
 	if gto := r.Header.Get("X-Raft-To"); gto != wto {
 		h.lg.Warn(
 			"ignored streaming request; ID mismatch",
@@ -444,7 +451,7 @@ func (h *streamHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusOK)
-	w.(http.Flusher).Flush()
+	w.(http.Flusher).Flush() //／调用Flush()方法将响应数据发送到对端节点
 
 	c := newCloseNotifier()
 	conn := &outgoingConn{
