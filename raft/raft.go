@@ -560,6 +560,7 @@ func (r *raft) sendHeartbeat(to uint64, ctx []byte) {
 func (r *raft) bcastAppend() {
 	//fmt.Printf("process:%s, time:%+v, function:%+s, msg:%+v\n", "write msg", time.Now().Unix(), "raft.raft.bcastAppend", "leader deal msg")
 	debug.WriteLog("raft.raft.bcastAppend", "leader deal msg", []pb.Message{})
+	// visit会对所有节点发送消息
 	r.prs.Visit(func(id uint64, _ *tracker.Progress) {
 		if id == r.id {
 			return
@@ -1170,7 +1171,7 @@ func stepLeader(r *raft, m pb.Message) error {
 		return nil
 	}
 	switch m.Type {
-	case pb.MsgAppResp:
+	case pb.MsgAppResp: // 接收Follower
 		pr.RecentActive = true
 
 		if m.Reject {
@@ -1544,13 +1545,14 @@ func stepFollower(r *raft, m pb.Message) error {
 	return nil
 }
 
+// 处理MsgApp类型消息
 func (r *raft) handleAppendEntries(m pb.Message) {
 	if m.Index < r.raftLog.committed {
 		r.send(pb.Message{To: m.From, Type: pb.MsgAppResp, Index: r.raftLog.committed})
 		return
 	}
 
-	if mlastIndex, ok := r.raftLog.maybeAppend(m.Index, m.LogTerm, m.Commit, m.Entries...); ok {
+	if mlastIndex, ok := r.raftLog.maybeAppend(m.Index, m.LogTerm, m.Commit, m.Entries...); ok { // 现将数据写入log，再给leader返回写入成功消息
 		r.send(pb.Message{To: m.From, Type: pb.MsgAppResp, Index: mlastIndex})
 	} else {
 		r.logger.Debugf("%x [logterm: %d, index: %d] rejected MsgApp [logterm: %d, index: %d] from %x",

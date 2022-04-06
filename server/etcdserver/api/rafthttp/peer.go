@@ -186,7 +186,7 @@ func startPeer(t *Transport, urls types.URLs, peerID types.ID, fs *stats.Followe
 
 	ctx, cancel := context.WithCancel(context.Background())
 	p.cancel = cancel
-	// 监听读取recvc数据，出prop之外的其他消息
+	// 监听读取recvc数据，除prop之外的其他消息
 	go func() {
 		for {
 			select {
@@ -251,6 +251,7 @@ func startPeer(t *Transport, urls types.URLs, peerID types.ID, fs *stats.Followe
 	return p
 }
 
+// pick选择对应的消息通道
 // 将数据写入writec(streamWriter.msgc)
 func (p *peer) send(m raftpb.Message) {
 	p.mu.Lock()
@@ -261,7 +262,7 @@ func (p *peer) send(m raftpb.Message) {
 		return
 	}
 
-	// 根据消息类型选择chan及返回名称(消息写入pipeline.msgc)
+	// 根据消息类型选择chan及返回名称(消息写入stream.msgc,快照消息写入pipeline.msgs)
 	writec, name := p.pick(m)
 	select {
 	case writec <- m: // 将message写入writec通道中，等待发送
