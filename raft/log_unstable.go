@@ -43,12 +43,12 @@ func (u *unstable) maybeFirstIndex() (uint64, bool) {
 // unstable entry or snapshot.
 func (u *unstable) maybeLastIndex() (uint64, bool) {
 	if l := len(u.entries); l != 0 {
-		return u.offset + uint64(l) - 1, true
+		return u.offset + uint64(l) - 1, true //返回 entries 中最后一条 Entry 记录的索引值
 	}
-	if u.snapshot != nil {
+	if u.snapshot != nil { //／如果存在快照数据 ，则 通过其元数据返回索引位
 		return u.snapshot.Metadata.Index, true
 	}
-	return 0, false
+	return 0, false // entries snapshot 都是空的，则整个 unstable 其实也就没有任何数据了
 }
 
 // maybeTerm returns the term of the entry at index i, if there
@@ -80,9 +80,12 @@ func (u *unstable) stableTo(i, t uint64) {
 	// if i < offset, term is matched with the snapshot
 	// only update the unstable entries if term is matched with
 	// an unstable entry.
-	if gt == t && i >= u.offset {
+	if gt == t && i >= u.offset { //指定的 Entry 记录在 unstable.entries 中保存
+		//指定索引位之前的 Entry 记录都已经完成持久化，则将其之前的全部 Entry 记录删除
 		u.entries = u.entries[i+1-u.offset:]
 		u.offset = i + 1
+		//随着多次追加日志和截断日志的操作，unstable.entires 底层的数组会越来越大，
+		//shrinkEntriesArray方法会在底层数组长度超过实际占用的两倍时，对反层数呈且进行缩减
 		u.shrinkEntriesArray()
 	}
 }
@@ -122,16 +125,18 @@ func (u *unstable) truncateAndAppend(ents []pb.Entry) {
 	after := ents[0].Index
 	switch {
 	case after == u.offset+uint64(len(u.entries)):
+		//／若待追加的记录与entries中的记录正好连续，则可以直接向entries中追加
 		// after is the next index in the u.entries
 		// directly append
 		u.entries = append(u.entries, ents...)
-	case after <= u.offset:
+	case after <= u.offset: //直接用待追加的 Entry 记录替换当前的 entries 字段并更新offset
 		u.logger.Infof("replace the unstable entries from index %d", after)
 		// The log is being truncated to before our current offset
 		// portion, so set the offset and replace the entries
 		u.offset = after
 		u.entries = ents
 	default:
+		//after 在offset~last 之间，则after~last 之间的 Entry 记录冲突 这里会将 offset~after之间的记录保留，抛弃 after 之后的记录，然后完成追加操作
 		// truncate to after and copy to u.entries
 		// then append
 		u.logger.Infof("truncate the unstable entries before index %d", after)

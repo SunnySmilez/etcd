@@ -391,14 +391,22 @@ type Message struct {
 	// index=101, and the term of entry at index 100 is 5.
 	// (type=MsgAppResp,reject=true,index=100,logTerm=5) means follower rejects some
 	// entries from its leader as it already has an entry with term 5 at index 100.
-	LogTerm    uint64   `protobuf:"varint,5,opt,name=logTerm" json:"logTerm"`
-	Index      uint64   `protobuf:"varint,6,opt,name=index" json:"index"`
-	Entries    []Entry  `protobuf:"bytes,7,rep,name=entries" json:"entries"`
-	Commit     uint64   `protobuf:"varint,8,opt,name=commit" json:"commit"`
-	Snapshot   Snapshot `protobuf:"bytes,9,opt,name=snapshot" json:"snapshot"`
-	Reject     bool     `protobuf:"varint,10,opt,name=reject" json:"reject"`
-	RejectHint uint64   `protobuf:"varint,11,opt,name=rejectHint" json:"rejectHint"`
-	Context    []byte   `protobuf:"bytes,12,opt,name=context" json:"context,omitempty"`
+	LogTerm uint64 `protobuf:"varint,5,opt,name=logTerm" json:"logTerm"`
+	//记录了一个索引值，该索引值的具体含义与消息的类型相关例如MsgApp消息的Index宇段保存了其携带的Entry记录（即 Entries 字段）中前一条记录的 Index值，而MsgAppResp肖息的 Index 字段则是Follower节点提示Leader节点下次从哪个位置开始发送Entry记录
+	Index uint64 `protobuf:"varint,6,opt,name=index" json:"index"`
+	//如果是 MsgApp 型的消息，则该字段中保存了Leader节点复制Follower节点的entrγ记录
+	Entries []Entry `protobuf:"bytes,7,rep,name=entries" json:"entries"`
+	//消息发送节点的提交位置
+	Commit uint64 `protobuf:"varint,8,opt,name=commit" json:"commit"`
+	//在传输快照时，该字段保存了快照数据
+	Snapshot Snapshot `protobuf:"bytes,9,opt,name=snapshot" json:"snapshot"`
+	//主要用于响应类型的消 息，表示是否拒绝收到的消息 例如，
+	//Follow 节点收到 Leader 节点发来的 MsgApp 消息 ，如 Follower 点发现 MsgApp
+	//消息携带的entry记录并不能直接追加到本地的raftLog中，会将对应消息Reject
+	//字段设置为 true ，并且会在RejectHint字段中记录合适的 Entry 索引值，供Leader节点参考
+	Reject     bool   `protobuf:"varint,10,opt,name=reject" json:"reject"`
+	RejectHint uint64 `protobuf:"varint,11,opt,name=rejectHint" json:"rejectHint"`
+	Context    []byte `protobuf:"bytes,12,opt,name=context" json:"context,omitempty"`
 }
 
 func (m *Message) Reset()         { *m = Message{} }

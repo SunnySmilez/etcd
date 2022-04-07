@@ -27,15 +27,16 @@ type raftLog struct {
 
 	// unstable contains all unstable entries and snapshot.
 	// they will be saved into storage.
+	//用于存储未写入Storage快照数据及Entry记录
 	unstable unstable
 
 	// committed is the highest log position that is known to be in
 	// stable storage on a quorum of nodes.
-	committed uint64
+	committed uint64 // 已提交的日志最大index
 	// applied is the highest log position that the application has
 	// been instructed to apply to its state machine.
 	// Invariant: applied <= committed
-	applied uint64
+	applied uint64 //己应用的位置，即己应用 Entry 录中最大的索引值。其中 committed与applied 之间始终满足 committed<= applied 这个不等式关系。
 
 	logger Logger
 
@@ -85,6 +86,11 @@ func (l *raftLog) String() string {
 
 // maybeAppend returns (0, false) if the entries cannot be appended. Otherwise,
 // it returns (last index of new entries, true).
+//第一个参数 index是MsgApp 消息携带的第一条Entry的Index的值， 这里的 MsgApp消息是etcd-raft模块中定义的消息类型之一，对应Raft协议提到
+//Append Entries消息； 第二参数logTerm是MsgApp消息的LogTerm字段，通过消息中携
+//带的 Term 值与当前节点记录的Term进行比较，就可以判断消息是否为过时的消息，第三
+//参数 committed是MsgApp消息的Commit宇段， Leader节点通过该字段通知Follower节点当
+//前己提交的Entry位置；第四个参数ents是MsgApp消息中携带的 entry记录，即待追加到raftLog中的 Entry记录
 func (l *raftLog) maybeAppend(index, logTerm, committed uint64, ents ...pb.Entry) (lastnewi uint64, ok bool) {
 	if l.matchTerm(index, logTerm) {
 		lastnewi = index + uint64(len(ents))
@@ -103,6 +109,7 @@ func (l *raftLog) maybeAppend(index, logTerm, committed uint64, ents ...pb.Entry
 	return 0, false
 }
 
+//通过调用 unstable.truncateAndAppend方法完成 录的追加功能
 func (l *raftLog) append(ents ...pb.Entry) uint64 {
 	if len(ents) == 0 {
 		return l.lastIndex()
@@ -125,13 +132,14 @@ func (l *raftLog) append(ents ...pb.Entry) uint64 {
 // a different term.
 // The index of the given entries MUST be continuously increasing.
 func (l *raftLog) findConflict(ents []pb.Entry) uint64 {
+	//／追历全部待追加的 Entry 判断 raftLog 中是否存在冲突的 Entry 记录
 	for _, ne := range ents {
-		if !l.matchTerm(ne.Index, ne.Term) {
+		if !l.matchTerm(ne.Index, ne.Term) { //查找冲突的entry记录
 			if ne.Index <= l.lastIndex() {
 				l.logger.Infof("found conflict at index %d [existing term: %d, conflicting term: %d]",
 					ne.Index, l.zeroTermOnErrCompacted(l.term(ne.Index)), ne.Term)
 			}
-			return ne.Index
+			return ne.Index //返回冲突记录的索引值
 		}
 	}
 	return 0
@@ -177,9 +185,11 @@ func (l *raftLog) unstableEntries() []pb.Entry {
 // nextEnts returns all the available entries for execution.
 // If applied is smaller than the index of snapshot, it returns all committed
 // entries after the index of snapshot.
+// 将己提交且未应用的entry的记录返回给上层模块处理
 func (l *raftLog) nextEnts() (ents []pb.Entry) {
-	off := max(l.applied+1, l.firstIndex())
-	if l.committed+1 > off {
+	off := max(l.applied+1, l.firstIndex()) //获取当前已经应用记录的位置
+	if l.committed+1 > off {                //是否存在已提交且未应用的 Entry 记录
+		//／获取全部已提交且未应用的 Entry 记录并返回
 		ents, err := l.slice(off, l.committed+1, l.maxNextEntsSize)
 		if err != nil {
 			l.logger.Panicf("unexpected error when getting unapplied entries (%v)", err)
@@ -191,9 +201,11 @@ func (l *raftLog) nextEnts() (ents []pb.Entry) {
 
 // hasNextEnts returns if there is any available entries for execution. This
 // is a fast check without heavy raftLog.slice() in raftLog.nextEnts().
+// 检测是否有待应用的记录
 func (l *raftLog) hasNextEnts() bool {
+	//／获取当前 已经应用 记录的位置
 	off := max(l.applied+1, l.firstIndex())
-	return l.committed+1 > off
+	return l.committed+1 > off //／是否存在己提交且未应用的 Entry 记录
 }
 
 // hasPendingSnapshot returns if there is pending snapshot waiting for applying.
@@ -230,9 +242,10 @@ func (l *raftLog) lastIndex() uint64 {
 	return i
 }
 
+//更新 raftLog.committed 宇段
 func (l *raftLog) commitTo(tocommit uint64) {
 	// never decrease commit
-	if l.committed < tocommit {
+	if l.committed < tocommit { //raftLog.committed 字段只能后移，不能前移
 		if l.lastIndex() < tocommit {
 			l.logger.Panicf("tocommit(%d) is out of range [lastIndex(%d)]. Was the raft log corrupted, truncated, or lost?", tocommit, l.lastIndex())
 		}
@@ -263,6 +276,7 @@ func (l *raftLog) lastTerm() uint64 {
 }
 
 func (l *raftLog) term(i uint64) (uint64, error) {
+	//检测指定的索引值的合法性
 	// the valid term range is [index of dummy entry, last index]
 	dummyIndex := l.firstIndex() - 1
 	if i < dummyIndex || i > l.lastIndex() {
@@ -270,10 +284,12 @@ func (l *raftLog) term(i uint64) (uint64, error) {
 		return 0, nil
 	}
 
+	//／尝试从 unstable 获取对应的 Entry 记录并返回其Term值
 	if t, ok := l.unstable.maybeTerm(i); ok {
 		return t, nil
 	}
 
+	//／尝试从 storage 获取对应的 Entry 记录并返回其 Term值
 	t, err := l.storage.Term(i)
 	if err == nil {
 		return t, nil
@@ -284,7 +300,9 @@ func (l *raftLog) term(i uint64) (uint64, error) {
 	panic(err) // TODO(bdarnell)
 }
 
+//获取指定的 Entry记录
 func (l *raftLog) entries(i, maxsize uint64) ([]pb.Entry, error) {
+	//／检测指定 Entry 记录索引值是否超出了raftLog的范围
 	if i > l.lastIndex() {
 		return nil, nil
 	}
@@ -315,7 +333,7 @@ func (l *raftLog) isUpToDate(lasti, term uint64) bool {
 }
 
 func (l *raftLog) matchTerm(i, term uint64) bool {
-	t, err := l.term(i)
+	t, err := l.term(i) //查询指定索引位对应的Entry记录的Term值
 	if err != nil {
 		return false
 	}
@@ -338,6 +356,8 @@ func (l *raftLog) restore(s pb.Snapshot) {
 
 // slice returns a slice of log entries from lo through hi-1, inclusive.
 func (l *raftLog) slice(lo, hi, maxSize uint64) ([]pb.Entry, error) {
+	//／边界检测 略），检测的条件是 firstindex () <= lo < hi <= l.lastindex()
+	//／如采 lo小于unstable.offset(unstable 条记录的索引） 则需要从raftLog.storage中获取记录
 	err := l.mustCheckOutOfBounds(lo, hi)
 	if err != nil {
 		return nil, err
@@ -347,6 +367,7 @@ func (l *raftLog) slice(lo, hi, maxSize uint64) ([]pb.Entry, error) {
 	}
 	var ents []pb.Entry
 	if lo < l.unstable.offset {
+		//／从 Storage 中获取记录，可能只能从 Storage 取前半部分（也就是 lo~l.unstable.offset部分）
 		storedEnts, err := l.storage.Entries(lo, min(hi, l.unstable.offset), maxSize)
 		if err == ErrCompacted {
 			return nil, err
@@ -357,14 +378,17 @@ func (l *raftLog) slice(lo, hi, maxSize uint64) ([]pb.Entry, error) {
 		}
 
 		// check if ents has reached the size limitation
+		//从Storage中取出的记录已经达到了 maxSize 的上限，则直接返回
 		if uint64(len(storedEnts)) < min(hi, l.unstable.offset)-lo {
 			return storedEnts, nil
 		}
 
 		ents = storedEnts
 	}
+	//／从 unstable 中取出后半部分记录，即 unstable.offset~hi的日志记录
 	if hi > l.unstable.offset {
 		unstable := l.unstable.slice(max(lo, l.unstable.offset), hi)
+		//／将 Storage 中获取的记录与 unstable 中获取的记录进行合并
 		if len(ents) > 0 {
 			combined := make([]pb.Entry, len(ents)+len(unstable))
 			n := copy(combined, ents)
@@ -374,6 +398,7 @@ func (l *raftLog) slice(lo, hi, maxSize uint64) ([]pb.Entry, error) {
 			ents = unstable
 		}
 	}
+	//／限制获取的记录切片的总字节数
 	return limitSize(ents, maxSize), nil
 }
 

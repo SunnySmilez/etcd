@@ -302,7 +302,7 @@ type raft struct {
 	// only leader keeps heartbeatElapsed.
 	heartbeatElapsed int // 心跳计时器的指针
 
-	checkQuorum bool // 当出现网络分区的场景，旧leader收不到新leader信息的时候，每隔一段时间，leader节点尝试连接其他集群中的其他节点，如果发现自己可以连接到节点个数没有超过半数，则主动切换follower状态
+	checkQuorum bool // 是否开启CheckQuorum；当出现网络分区的场景，旧leader收不到新leader信息的时候，每隔一段时间，leader节点尝试连接其他集群中的其他节点，如果发现自己可以连接到节点个数没有超过半数，则主动切换follower状态
 	preVote     bool // 当出现网络分区的场景，follower节点不不断的尝试进行选举，导致term值增大，当网络恢复的时候，由于term值比当前心跳的term大，会发起一次无用的选举。为了避免这种场景，follower节点准备发起一次选举之前，会连接集群中其他的节点，并询问他们是否愿意选举，如果集群中的其他节点能政策收到leader的信息则拒绝参加选举，否则参加
 
 	heartbeatTimeout int // 心跳超时时间
@@ -317,7 +317,7 @@ type raft struct {
 	disableProposalForwarding bool
 
 	tick func()   //当前节点推进逻辑时钟的函数；当前节点是 Leader，则指向 raft.tickH由此beat()函数，如果当前节点是 Follower 或是 Candidate ，则指向 raft.tickElection()函数
-	step stepFunc // 当前节点收到消息时的处理函数；Leader 节点， 则 该 字段指向 stepLeader()函数，如果是 Follower 节点，则该字段指向 stepFollower()函数， 如果是处于 preVote 阶段的节点或是 Candidate 节点，则该字段指向 stepCandidate()函 数
+	step stepFunc // 当前节点收到消息时的处理函数；Leader 节点， 则该字段指向 stepLeader()函数，如果是Follower节点，则该字段指向 stepFollower()函数， 如果是处于 preVote 阶段的节点或是 Candidate 节点，则该字段指向stepCandidate()函数
 
 	logger Logger
 
@@ -345,7 +345,7 @@ func newRaft(c *Config) *raft {
 	if err := c.validate(); err != nil {
 		panic(err.Error())
 	}
-	raftlog := newLogWithSize(c.Storage, c.Logger, c.MaxCommittedSizePerReady) // 初始化raftlog，指定存储方式storage
+	raftlog := newLogWithSize(c.Storage, c.Logger, c.MaxCommittedSizePerReady) // 初始化raftlog，用于记录entry，指定存储方式storage
 	hs, cs, err := c.Storage.InitialState()                                    // 返回状态值
 	if err != nil {
 		panic(err) // TODO(bdarnell)
@@ -379,7 +379,7 @@ func newRaft(c *Config) *raft {
 	assertConfStatesEquivalent(r.logger, cs, r.switchToConfig(cfg, prs)) // 判断配置是否一致
 
 	if !IsEmptyHardState(hs) { // term，vote，commit任意一个值为空
-		r.loadState(hs) // 加载state（term，vote，commit赋值）
+		r.loadState(hs) // 根据 Storage中获取的HardState，加载state（term，vote，commit赋值）
 	}
 	if c.Applied > 0 { // 最后一个应用的索引，在restart的时候使用
 		raftlog.appliedTo(c.Applied)
@@ -454,7 +454,7 @@ func (r *raft) send(m pb.Message) {
 
 // sendAppend sends an append RPC with new entries (if any) and the
 // current commit index to the given peer.
-func (r *raft) sendAppend(to uint64) { // 数据发送给别的节点
+func (r *raft) sendAppend(to uint64) { // 数据发送给别的节点,发送MsgApp类型消息
 	r.maybeSendAppend(to, true)
 }
 
@@ -473,12 +473,14 @@ func (r *raft) maybeSendAppend(to uint64, sendIfEmpty bool) bool {
 	m := pb.Message{}
 	m.To = to
 
+	//根据当前Leader节点记录的 Next 查找发往指定节点的 Entry 记录（ents）及 Next 索引对应的term值
 	term, errt := r.raftLog.term(pr.Next - 1)
 	ents, erre := r.raftLog.entries(pr.Next, r.maxMsgSize)
 	if len(ents) == 0 && !sendIfEmpty {
 		return false
 	}
 
+	// 上面两次raftLog查找异常，则发送MsgSnap消息，并将快照发送到指定节点
 	if errt != nil || erre != nil { // send snapshot if we failed to get term or entries
 		if !pr.RecentActive {
 			r.logger.Debugf("ignore sending snapshot to %x since it is not recently active", to)
@@ -509,6 +511,7 @@ func (r *raft) maybeSendAppend(to uint64, sendIfEmpty bool) bool {
 		m.Index = pr.Next - 1
 		m.LogTerm = term
 		m.Entries = ents
+		//／设置消息的 Commit 字段， 即当前节点的 raftLog 中最后一条已提交的记录索引值
 		m.Commit = r.raftLog.committed
 		fmt.Printf("roel:raft-leader pr.Inflights:%+v\n", *pr.Inflights)
 		if n := len(m.Entries); n != 0 {
@@ -632,9 +635,10 @@ func (r *raft) advance(rd Ready) {
 // maybeCommit attempts to advance the commit index. Returns true if
 // the commit index changed (in which case the caller should call
 // r.bcastAppend).
+// 已经复制过半节点，则尝试提交
 func (r *raft) maybeCommit() bool {
-	mci := r.prs.Committed()
-	return r.raftLog.maybeCommit(mci, r.Term)
+	mci := r.prs.Committed()                  // todo 应该是返回已经提交的节点数目
+	return r.raftLog.maybeCommit(mci, r.Term) // 更新commited字段，完成提交
 }
 
 // 重置term将vote赋值none
@@ -675,9 +679,9 @@ func (r *raft) reset(term uint64) {
 func (r *raft) appendEntry(es ...pb.Entry) (accepted bool) {
 	fmt.Printf("role:raft-leader,method:appendEntry, es:%+v\n", es)
 	li := r.raftLog.lastIndex() // 获取raftlog的最后的key
-	for i := range es {
-		es[i].Term = r.Term
-		es[i].Index = li + 1 + uint64(i)
+	for i := range es {         //更新待追加记录 Term 值和索引值
+		es[i].Term = r.Term              //Entry 记录 Term 指定为当前Leader的任期
+		es[i].Index = li + 1 + uint64(i) //日志记录指定工口dex
 	}
 	// Track the size of this uncommitted proposal.
 	if !r.increaseUncommittedSize(es) { // 记录未处理的数据大小
@@ -692,7 +696,7 @@ func (r *raft) appendEntry(es ...pb.Entry) (accepted bool) {
 	li = r.raftLog.append(es...)         // 数据追加到raftlog，记录到r.raftLog.unstable
 	r.prs.Progress[r.id].MaybeUpdate(li) // 响应flower
 	// Regardless of maybeCommit's return, our caller will call bcastAppend.
-	r.maybeCommit()
+	r.maybeCommit() //尝试提交记录
 	return true
 }
 

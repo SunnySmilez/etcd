@@ -269,10 +269,10 @@ func (ms *MemoryStorage) Append(entries []pb.Entry) error {
 
 	offset := entries[0].Index - ms.ents[0].Index
 	switch {
-	case uint64(len(ms.ents)) > offset:
+	case uint64(len(ms.ents)) > offset: //／保留 MemoryStorage.ents中的first-offset 的部分， offset之后的部分被抛弃
 		ms.ents = append([]pb.Entry{}, ms.ents[:offset]...)
 		ms.ents = append(ms.ents, entries...)
-	case uint64(len(ms.ents)) == offset:
+	case uint64(len(ms.ents)) == offset: //／直接将待追加的日志记录（ entries ）追加到 MemoryStorage
 		ms.ents = append(ms.ents, entries...)
 	default:
 		getLogger().Panicf("missing log entry [last: %d, append at: %d]",
