@@ -413,10 +413,10 @@ func (r *raft) hardState() pb.HardState {
 // sending the message (as part of next Ready message processing).
 // 当Type=MsgProp，将数据写入msgs
 func (r *raft) send(m pb.Message) {
-	if m.Type == pb.MsgProp {
-		//fmt.Printf("process:%s, time:%+v, function:%+s, msg:%+v\n", "write msg", time.Now().Unix(), "raft.raft.send", "append msg to raft.msgs")
-		debug.WriteLog("raft.raft.send", "append msg to raft.msgs", []pb.Message{m})
-	}
+	//if m.Type == pb.MsgProp {
+	//fmt.Printf("process:%s, time:%+v, function:%+s, msg:%+v\n", "write msg", time.Now().Unix(), "raft.raft.send", "append msg to raft.msgs")
+	debug.WriteLog("raft.raft.send", "append msg to raft.msgs", []pb.Message{m})
+	//}
 
 	if m.From == None {
 		m.From = r.id
@@ -504,6 +504,7 @@ func (r *raft) maybeSendAppend(to uint64, sendIfEmpty bool) bool {
 		pr.BecomeSnapshot(sindex)
 		r.logger.Debugf("%x paused sending replication messages to %x [%s]", r.id, to, pr)
 	} else {
+		oldType := m.Type
 		m.Type = pb.MsgApp
 		m.Index = pr.Next - 1
 		m.LogTerm = term
@@ -523,7 +524,7 @@ func (r *raft) maybeSendAppend(to uint64, sendIfEmpty bool) bool {
 				r.logger.Panicf("%x is sending append in unhandled state %s", r.id, pr.State)
 			}
 		}
-		fmt.Printf("here,%+v\n\n\n", m)
+		debug.WriteLog("raft.raft.maybeSendAppend", fmt.Sprintf("%s->MsgApp", oldType), []pb.Message{m})
 	}
 
 	/*if m.Type == pb.MsgProp {
@@ -904,7 +905,10 @@ func (r *raft) Step(m pb.Message) error {
 	//fmt.Printf("raft info:%+v\n node info:%+v\n", r, m)
 	// Handle the message term, which may result in our stepping down to a follower.
 	//todo 此处应该是异常数据处理
-	switch {
+	if m.Type != pb.MsgHeartbeat && m.Type != pb.MsgBeat {
+		debug.WriteLog("raft.raft.Step", fmt.Sprintf("raft deal msg, r.Term=%d, m.Term=%d, m.Type=%s", r.Term, m.Term, m.Type), []pb.Message{m})
+	}
+	switch { // 正常收发消息都是m.Term=r.Term
 	case m.Term == 0: // 本地消息不做任何处理
 		// local message
 	case m.Term > r.Term:
@@ -962,7 +966,6 @@ func (r *raft) Step(m pb.Message) error {
 			// However, this disruption is inevitable to free this stuck node with
 			// fresh election. This can be prevented with Pre-Vote phase.
 			r.send(pb.Message{To: m.From, Type: pb.MsgAppResp}) // 此处会把MsgApp的类型定义为MsgAppResp类型
-			fmt.Printf("MsgApp->MsgAppResp\n\n")
 		} else if m.Type == pb.MsgPreVote {
 			// Before Pre-Vote enable, there may have candidate with higher term,
 			// but less log. After update to Pre-Vote, the cluster may deadlock if
@@ -1172,11 +1175,12 @@ func stepLeader(r *raft, m pb.Message) error {
 		r.logger.Debugf("%x no progress available for %x", r.id, m.From)
 		return nil
 	}
+	debug.WriteLog("raft.raft.stepLeader", "deal MsgAppResp msg", []pb.Message{m})
 	switch m.Type {
 	case pb.MsgAppResp: // 接收Follower
 		pr.RecentActive = true
 
-		if m.Reject {
+		if m.Reject { // msgApp消息被拒绝
 			// RejectHint is the suggested next base entry for appending (i.e.
 			// we try to append entry RejectHint+1 next), and LogTerm is the
 			// term that the follower has at index RejectHint. Older versions
@@ -1304,13 +1308,18 @@ func stepLeader(r *raft, m pb.Message) error {
 				}
 				r.sendAppend(m.From)
 			}
-		} else {
+		} else { // msgApp消息已接收
 			oldPaused := pr.IsPaused()
+			debug.WriteLog("raft.raft.stepLeader", fmt.Sprintf("pr.match:%+v, m.index:%+v", pr.Match, m.Index), []pb.Message{m})
 			if pr.MaybeUpdate(m.Index) {
+				debug.WriteLog("raft.raft.stepLeader", fmt.Sprintf("maybeUpdate pr:%+v", pr), []pb.Message{m})
 				switch {
+				//一旦 MsgApp 被 Follower 节点接收，则表示已经找到其正确的 Next 和 Match, 不必再进行“试探”，这里将对应的 Progress.state 切换成 ProgressStateReplicate
 				case pr.State == tracker.StateProbe:
 					pr.BecomeReplicate()
-				case pr.State == tracker.StateSnapshot && pr.Match >= pr.PendingSnapshot:
+				//之前由于某些原因， Leader 节点通过发送快照的方式恢复 Follower 节点，但在发送 MsgSnap 消息的过程中， Follower节点恢复，并正常接收了 Leader 节点的 MsgApp 消息，此时会丢弃 MsgSnap 消息，并开始“试探”该 Follower 节点正确的 Match 和 Next 值
+				case pr.State == tracker.StateSnapshot && pr.Match >= pr.PendingSnapshot: // 需要进行快照操作
+
 					// TODO(tbg): we should also enter this branch if a snapshot is
 					// received that is below pr.PendingSnapshot but which makes it
 					// possible to use the log again.
@@ -1322,18 +1331,22 @@ func stepLeader(r *raft, m pb.Message) error {
 					// round for a while, exposing an inconsistent RaftStatus).
 					pr.BecomeProbe()
 					pr.BecomeReplicate()
-				case pr.State == tracker.StateReplicate:
+				case pr.State == tracker.StateReplicate: //数据同步
+					//之前向某个 Follower 节点发送 MsgApp 消息时，会将其相关信息保存到对应的Progress.ins 中，在这里收到相应的 MsgAppResp 响应之后，会将其从 ins 中删除，这样可以实现了限流的效采，避免网络出现延迟时，继续发送消息，从而导致网络更加拥堵
 					pr.Inflights.FreeLE(m.Index)
 				}
 
+				//收到 一 个 Follower 节点的 MsgAppResp 消息之后，除了修改相应的 Match 和 Next 佳，还会尝试更新 raftLog.committed，因为有些 Entry 记录可能在此次复制中被保存到了半数以上的节点中
 				if r.maybeCommit() {
 					// committed index has progressed for the term, so it is safe
 					// to respond to pending read index requests
 					releasePendingReadIndexMessages(r)
+					//向所有节点发送 MsgApp 消息，注意，此次 MsgApp 消息的 Commit 字段与上次 MsgApp 消息已经不同
 					r.bcastAppend()
 				} else if oldPaused {
 					// If we were paused before, this node may be missing the
 					// latest commit index, so send it.
+					//之前是 pause 状态，现在可以任性地发消息了；之前 Leader 节点暂停向该 Follower 节点发送消息，收到 MsgAppResp 消息后，在上述代码中已经重立了相应状态，所以可以继续发送 MsgApp 消息
 					r.sendAppend(m.From)
 				}
 				// We've updated flow control information above, which may
@@ -1548,12 +1561,16 @@ func stepFollower(r *raft, m pb.Message) error {
 }
 
 // 处理MsgApp类型消息
+// 此处消息返回MsgAppResp类型
 func (r *raft) handleAppendEntries(m pb.Message) {
+	debug.WriteLog("raft.raft.handleAppendEntries", fmt.Sprintf("raft deal MsgApp msg, m.Index =%d, r.raftLog.committed=%d", m.Index, r.raftLog.committed), []pb.Message{m})
 	if m.Index < r.raftLog.committed {
 		r.send(pb.Message{To: m.From, Type: pb.MsgAppResp, Index: r.raftLog.committed})
 		return
 	}
 
+	debug.WriteLog("raft.raft.handleAppendEntries", fmt.Sprintf("%s->MsgAppResp", m.Type), []pb.Message{m})
+	// 此处消息返回MsgAppResp类型
 	if mlastIndex, ok := r.raftLog.maybeAppend(m.Index, m.LogTerm, m.Commit, m.Entries...); ok { // 现将数据写入log，再给leader返回写入成功消息
 		r.send(pb.Message{To: m.From, Type: pb.MsgAppResp, Index: mlastIndex})
 	} else {

@@ -545,6 +545,7 @@ func (rc *raftNode) serveRaft() { //启动raft服务
 }
 
 func (rc *raftNode) Process(ctx context.Context, m raftpb.Message) error {
+	debug.WriteLog("raftexample.raft.Process", "deal data for peer", []raftpb.Message{m})
 	return rc.node.Step(ctx, m)
 }
 func (rc *raftNode) IsIDRemoved(id uint64) bool  { return false }

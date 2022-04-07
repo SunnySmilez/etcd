@@ -16,6 +16,7 @@ package tracker
 
 import (
 	"fmt"
+	"go.etcd.io/etcd/raft/v3/debug"
 	"sort"
 	"strings"
 )
@@ -145,6 +146,7 @@ func (pr *Progress) BecomeSnapshot(snapshoti uint64) {
 // index acked by it. The method returns false if the given n index comes from
 // an outdated message. Otherwise it updates the progress and returns true.
 func (pr *Progress) MaybeUpdate(n uint64) bool {
+	debug.WriteLog("tracker.progress.MaybeUpdate", fmt.Sprintf("pr.match=%d, n=%d", pr.Match, n), nil)
 	var updated bool
 	if pr.Match < n {
 		pr.Match = n
@@ -159,6 +161,9 @@ func (pr *Progress) MaybeUpdate(n uint64) bool {
 // are in-flight. As a result, Next is increased to n+1.
 func (pr *Progress) OptimisticUpdate(n uint64) { pr.Next = n + 1 }
 
+//maybeDecrTo ()方法的两个参数都是 MsgAppResp 消息携带的信息:
+//reject 是被拒绝 MsgApp 消息的 Index 字段，
+//last 是被拒绝 MsgAppResp 消息的 RejectHint 字段(即对应 Follower 节点 raftLog 中最后一条 II E口try记录的索引)
 // MaybeDecrTo adjusts the Progress to the receipt of a MsgApp rejection. The
 // arguments are the index of the append message rejected by the follower, and
 // the hint that we want to decrease to.
@@ -174,11 +179,11 @@ func (pr *Progress) MaybeDecrTo(rejected, matchHint uint64) bool {
 	if pr.State == StateReplicate {
 		// The rejection must be stale if the progress has matched and "rejected"
 		// is smaller than "match".
-		if rejected <= pr.Match {
+		if rejected <= pr.Match { //出现过时的 MsgAppResp 消息 ，直接忽略
 			return false
 		}
 		// Directly decrease next to match + 1.
-		//
+		//处于ProgressStateReplicate 状态时，发送 MsgApp的消息的同时会直接调用 Progress.optimisticUpdate ()方法增加 Next，这就使得 Next 可能会 比 Match 大很多，这里回退 Next 至 Match 位置，并在后面重新发送 MsgApp 消息进行尝试
 		// TODO(tbg): why not use matchHint if it's larger?
 		pr.Next = pr.Match + 1
 		return true
@@ -186,10 +191,10 @@ func (pr *Progress) MaybeDecrTo(rejected, matchHint uint64) bool {
 
 	// The rejection must be stale if "rejected" does not match next - 1. This
 	// is because non-replicating followers are probed one entry at a time.
-	if pr.Next-1 != rejected {
+	if pr.Next-1 != rejected { //出现过时的 MsgAppResp 消息，直接忽略
 		return false
 	}
-
+	//根据 MsgAppResp 携带的信息重直 Next
 	pr.Next = max(min(rejected, matchHint+1), 1)
 	pr.ProbeSent = false
 	return true

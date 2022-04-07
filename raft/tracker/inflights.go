@@ -22,15 +22,19 @@ package tracker
 // ack is received.
 type Inflights struct {
 	// the starting index in the buffer
+	//数组被当作一个环形数组使用， start 字段 中记录 buffer 中第一条 MsgApp 消息的下标
 	start int
 	// number of inflights in the buffer
+	//当前 inflights 实例中记录的 MsgApp 消息个数
 	count int
 
 	// the size of the buffer
+	//当前inflights实例中能够记录的MsgApp消息个数的上限
 	size int
 
 	// buffer contains the index of the last entry
 	// inside one message.
+	//用来记录 MsgApp 消息相关信息的数组，其中记录的是 MsgApp 消息中最后一条 Entry记录的索引值
 	buffer []uint64
 }
 
@@ -54,18 +58,18 @@ func (in *Inflights) Clone() *Inflights {
 // for one more message, and consecutive calls to add Add() must provide a
 // monotonic sequence of indexes.
 func (in *Inflights) Add(inflight uint64) {
-	if in.Full() {
+	if in.Full() { //检测当前 buffer 数组是否已经被填充满了
 		panic("cannot add into a Full inflights")
 	}
-	next := in.start + in.count
+	next := in.start + in.count //获取新增消息的下标
 	size := in.size
-	if next >= size {
+	if next >= size { //环形队列
 		next -= size
 	}
-	if next >= len(in.buffer) {
+	if next >= len(in.buffer) { //初始化时的buffer数组较短，随着使用会不断进行扩容(两倍）， 但其扩容的上限为size
 		in.grow()
 	}
-	in.buffer[next] = inflight
+	in.buffer[next] = inflight //在 next位置记录消息中最后一条 Entry记录的索引值
 	in.count++
 }
 

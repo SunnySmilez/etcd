@@ -100,3 +100,15 @@ func TestSwitch(t *testing.T) {
 		print("default")
 	}
 }
+
+// 类型强制转换
+func TestType(t *testing.T) {
+	type demo map[int]string
+
+	a := map[int]string{
+		1: "a",
+		2: "b",
+	}
+
+	fmt.Printf("%+v", demo(a))
+}

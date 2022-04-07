@@ -191,6 +191,7 @@ func startPeer(t *Transport, urls types.URLs, peerID types.ID, fs *stats.Followe
 		for {
 			select {
 			case mm := <-p.recvc:
+				debug.WriteLog("peer.startPeer", "read data from stream.recvc", []raftpb.Message{mm})
 				if err := r.Process(ctx, mm); err != nil { // raft处理消息
 					if t.Logger != nil {
 						t.Logger.Warn("failed to process Raft message", zap.Error(err))

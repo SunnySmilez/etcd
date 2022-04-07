@@ -446,7 +446,9 @@ func (cr *streamReader) run() {
 					zap.String("remote-peer-id", cr.peerID.String()),
 				)
 			}
+			debug.WriteLog("stream.(streamReader).run", "read data from cache", nil)
 			err = cr.decodeLoop(rc, t) // 读取数据，写入streamReader.recvc/streamReader.propc
+
 			if cr.lg != nil {
 				cr.lg.Warn(
 					"lost TCP streaming connection with remote peer",
@@ -558,6 +560,7 @@ func (cr *streamReader) decodeLoop(rc io.ReadCloser, t streamType) error {
 			recvc = cr.propc
 		}
 
+		debug.WriteLog("stream.(streamReader).decodeLoop", "read data from cache", []raftpb.Message{m})
 		select {
 		case recvc <- m: //数据写入streamReader.recvs/streamReader.propc;交给底层raft状态机处理
 		default:

@@ -341,8 +341,8 @@ func (n *node) run() {
 			rd = n.rn.readyWithoutAccept() // 将raft.msgs数据写入rd.message并补充部分属性数据
 			// 查看MsgProp日志，不是项目代码
 			//if len(r.msgs) != 0 && rd.Messages[0].Type != pb.MsgHeartbeat && rd.Messages[0].Type != pb.MsgHeartbeatResp {
-			if len(r.msgs) != 0 && rd.Messages[0].Type == pb.MsgProp {
-				fmt.Printf("n.readyc:%+v\n", n.readyc)
+			if len(r.msgs) != 0 && (rd.Messages[0].Type == pb.MsgProp || rd.Messages[0].Type == pb.MsgApp || rd.Messages[0].Type == pb.MsgAppResp) {
+				//	fmt.Printf("n.readyc:%+v\n", n.readyc)
 				//fmt.Printf("process:%s, time:%+v, function:%+s, write msg to node.readyc:%+v\n", "write msg", time.Now().Unix(), "raft.node.run", &n.readyc)
 				debug.WriteLog("raft.node.run", "write msg to node.readyc", rd.Messages)
 			}
@@ -384,6 +384,7 @@ func (n *node) run() {
 			}
 		case m := <-n.recvc: // 非prop类型数据写入recvs
 			// filter out response message from unknown From.
+			debug.WriteLog("raft.node.run", "read node.recvc data", []pb.Message{m})
 			if pr := r.prs.Progress[m.From]; pr != nil || !IsResponseMsg(m.Type) {
 				r.Step(m)
 			}
@@ -512,11 +513,12 @@ func (n *node) stepWait(ctx context.Context, m pb.Message) error {
 // 将数据写入了node对象
 // 将raftnode.propc数据写入到raftnode.node.propc
 func (n *node) stepWithWaitOption(ctx context.Context, m pb.Message, wait bool) error {
-	if m.Type != pb.MsgProp {
+	if m.Type != pb.MsgProp { // 非msgProp类型消息
 		//todo 此处会循环执行，是有心跳？
 		//fmt.Printf("m.Type != pb.MsgProp\n")
 		select {
 		case n.recvc <- m: // 数据写入到recvc
+			debug.WriteLog("raft.node.stepWithWaitOption", "write to node.recvc", []pb.Message{m})
 			return nil
 		case <-ctx.Done():
 			return ctx.Err()
