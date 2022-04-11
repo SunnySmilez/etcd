@@ -13,7 +13,7 @@ func TestCommand(t *testing.T) {
 	//cd /Users/zhouzhi/Desktop/next/etcd/contrib/raftexample && go mod vendor && go build -o raftexample && ./raftexample --id 1 --cluster http://127.0.0.1:12379,http://127.0.0.1:22379,http://127.0.0.1:32379 --port 12380
 	//cd /Users/zhouzhi/Desktop/next/etcd/contrib/raftexample && ./raftexample --id 2 --cluster http://127.0.0.1:12379,http://127.0.0.1:22379,http://127.0.0.1:32379 --port 22380
 	//cd /Users/zhouzhi/Desktop/next/etcd/contrib/raftexample && ./raftexample --id 3 --cluster http://127.0.0.1:12379,http://127.0.0.1:22379,http://127.0.0.1:32379 --port 32380
-	//写入数据：curl -L http://127.0.0.1:22380/my-key12 -XPUT -d bar
+	//写入数据：curl -L http://127.0.0.1:12380/my-key -XPUT -d bar
 	//读取数据：curl -L http://127.0.0.1:32380/my-key
 	//添加节点：curl -L http://127.0.0.1:12380/4 -XPOST -d http://127.0.0.1:42379
 	//raftexample --id 4 --cluster http://127.0.0.1:12379,http://127.0.0.1:22379,http://127.0.0.1:32379,http://127.0.0.1:42379 --port 42380 --join

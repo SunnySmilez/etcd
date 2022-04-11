@@ -16,6 +16,7 @@ package raft
 
 import (
 	"fmt"
+	"go.etcd.io/etcd/raft/v3/debug"
 	"log"
 
 	pb "go.etcd.io/etcd/raft/v3/raftpb"
@@ -92,17 +93,18 @@ func (l *raftLog) String() string {
 //参数 committed是MsgApp消息的Commit宇段， Leader节点通过该字段通知Follower节点当
 //前己提交的Entry位置；第四个参数ents是MsgApp消息中携带的 entry记录，即待追加到raftLog中的 Entry记录
 func (l *raftLog) maybeAppend(index, logTerm, committed uint64, ents ...pb.Entry) (lastnewi uint64, ok bool) {
-	if l.matchTerm(index, logTerm) {
-		lastnewi = index + uint64(len(ents))
-		ci := l.findConflict(ents)
+	if l.matchTerm(index, logTerm) { // 判断消息是当前任期的
+		lastnewi = index + uint64(len(ents)) // 计算最后的偏移量
+		ci := l.findConflict(ents)           // 判断ent中每条消息中的term与raftLog中term是否相等
 		switch {
-		case ci == 0:
-		case ci <= l.committed:
+		case ci == 0: // 不存在term不相等的记录
+		case ci <= l.committed: // term不相等的记录的索引值小于已经提交的日志
 			l.logger.Panicf("entry %d conflict with committed entry [committed(%d)]", ci, l.committed)
 		default:
 			offset := index + 1
 			l.append(ents[ci-offset:]...)
 		}
+		// 更新 raftLog.committed 字段
 		l.commitTo(min(committed, lastnewi))
 		return lastnewi, true
 	}
@@ -133,8 +135,8 @@ func (l *raftLog) append(ents ...pb.Entry) uint64 {
 // The index of the given entries MUST be continuously increasing.
 func (l *raftLog) findConflict(ents []pb.Entry) uint64 {
 	//／追历全部待追加的 Entry 判断 raftLog 中是否存在冲突的 Entry 记录
-	for _, ne := range ents {
-		if !l.matchTerm(ne.Index, ne.Term) { //查找冲突的entry记录
+	for _, ne := range ents { // 判断ents中的term是否相同
+		if !l.matchTerm(ne.Index, ne.Term) { //判断ent中的term是否和commitLog是一个
 			if ne.Index <= l.lastIndex() {
 				l.logger.Infof("found conflict at index %d [existing term: %d, conflicting term: %d]",
 					ne.Index, l.zeroTermOnErrCompacted(l.term(ne.Index)), ne.Term)
@@ -242,7 +244,7 @@ func (l *raftLog) lastIndex() uint64 {
 	return i
 }
 
-//更新 raftLog.committed 宇段
+// 更新 raftLog.committed 字段
 func (l *raftLog) commitTo(tocommit uint64) {
 	// never decrease commit
 	if l.committed < tocommit { //raftLog.committed 字段只能后移，不能前移
@@ -341,7 +343,8 @@ func (l *raftLog) matchTerm(i, term uint64) bool {
 }
 
 func (l *raftLog) maybeCommit(maxIndex, term uint64) bool {
-	if maxIndex > l.committed && l.zeroTermOnErrCompacted(l.term(maxIndex)) == term {
+	debug.WriteLog("raft.log.maybeCommit", fmt.Sprintf("maxIndex:%+v, l:%+v", maxIndex, l), nil)
+	if maxIndex > l.committed && l.zeroTermOnErrCompacted(l.term(maxIndex)) == term { // 中间节点的提交记录大于当前已提交的记录，说明过半数的节点已经完成了提交
 		l.commitTo(maxIndex)
 		return true
 	}

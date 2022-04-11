@@ -16,6 +16,7 @@ package tracker
 
 import (
 	"fmt"
+	"go.etcd.io/etcd/raft/v3/debug"
 	"sort"
 	"strings"
 
@@ -179,6 +180,7 @@ func (l matchAckIndexer) AckedIndex(id uint64) (quorum.Index, bool) {
 func (p *ProgressTracker) Committed() uint64 {
 	// 类型强制转换
 	//fmt.Printf("matchAckIndexer:%+v", matchAckIndexer(p.Progress))
+	debug.WriteLog("raft.tracker.tracker", fmt.Sprintf("matchAckIndexer(p.Progress)):%+v", matchAckIndexer(p.Progress)), nil)
 	return uint64(p.Voters.CommittedIndex(matchAckIndexer(p.Progress)))
 }
 

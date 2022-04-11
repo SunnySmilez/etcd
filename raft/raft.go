@@ -513,7 +513,7 @@ func (r *raft) maybeSendAppend(to uint64, sendIfEmpty bool) bool {
 		m.Entries = ents
 		//／设置消息的 Commit 字段， 即当前节点的 raftLog 中最后一条已提交的记录索引值
 		m.Commit = r.raftLog.committed
-		fmt.Printf("roel:raft-leader pr.Inflights:%+v\n", *pr.Inflights)
+		fmt.Printf("role:raft-leader pr.Inflights:%+v\n", *pr.Inflights)
 		if n := len(m.Entries); n != 0 {
 			switch pr.State {
 			// optimistically increase the next when in StateReplicate
@@ -564,7 +564,7 @@ func (r *raft) sendHeartbeat(to uint64, ctx []byte) {
 // according to the progress recorded in r.prs.
 func (r *raft) bcastAppend() {
 	//fmt.Printf("process:%s, time:%+v, function:%+s, msg:%+v\n", "write msg", time.Now().Unix(), "raft.raft.bcastAppend", "leader deal msg")
-	debug.WriteLog("raft.raft.bcastAppend", "leader deal msg", []pb.Message{})
+	debug.WriteLog("raft.raft.bcastAppend", "leader deal msg", nil)
 	// visit会对所有节点发送消息
 	r.prs.Visit(func(id uint64, _ *tracker.Progress) {
 		if id == r.id {
@@ -637,7 +637,8 @@ func (r *raft) advance(rd Ready) {
 // r.bcastAppend).
 // 已经复制过半节点，则尝试提交
 func (r *raft) maybeCommit() bool {
-	mci := r.prs.Committed()                  // todo 应该是返回已经提交的节点数目
+	mci := r.prs.Committed() // 返回的中间节点的提交数目
+	debug.WriteLog("raft.raft.maybeCommit", fmt.Sprintf("mci:%d", mci), nil)
 	return r.raftLog.maybeCommit(mci, r.Term) // 更新commited字段，完成提交
 }
 
@@ -1174,6 +1175,7 @@ func stepLeader(r *raft, m pb.Message) error {
 	}
 
 	// All other message types require a progress for m.From (pr).
+	// 发送消息节点的信息
 	pr := r.prs.Progress[m.From]
 	if pr == nil {
 		r.logger.Debugf("%x no progress available for %x", r.id, m.From)
@@ -1181,7 +1183,7 @@ func stepLeader(r *raft, m pb.Message) error {
 	}
 	debug.WriteLog("raft.raft.stepLeader", "deal MsgAppResp msg", []pb.Message{m})
 	switch m.Type {
-	case pb.MsgAppResp: // 接收Follower
+	case pb.MsgAppResp: // 接收Follower发送的响应消息
 		pr.RecentActive = true
 
 		if m.Reject { // msgApp消息被拒绝
@@ -1315,7 +1317,7 @@ func stepLeader(r *raft, m pb.Message) error {
 		} else { // msgApp消息已接收
 			oldPaused := pr.IsPaused()
 			debug.WriteLog("raft.raft.stepLeader", fmt.Sprintf("pr.match:%+v, m.index:%+v", pr.Match, m.Index), []pb.Message{m})
-			if pr.MaybeUpdate(m.Index) {
+			if pr.MaybeUpdate(m.Index) { // 修改pr.Match及pr.Next的值
 				debug.WriteLog("raft.raft.stepLeader", fmt.Sprintf("maybeUpdate pr:%+v", pr), []pb.Message{m})
 				switch {
 				//一旦 MsgApp 被 Follower 节点接收，则表示已经找到其正确的 Next 和 Match, 不必再进行“试探”，这里将对应的 Progress.state 切换成 ProgressStateReplicate
@@ -1340,19 +1342,23 @@ func stepLeader(r *raft, m pb.Message) error {
 					pr.Inflights.FreeLE(m.Index)
 				}
 
-				//收到 一 个 Follower 节点的 MsgAppResp 消息之后，除了修改相应的 Match 和 Next 佳，还会尝试更新 raftLog.committed，因为有些 Entry 记录可能在此次复制中被保存到了半数以上的节点中
+				//收到 一 个 Follower 节点的 MsgAppResp 消息之后，除了修改相应的 Match 和 Next 值，还会尝试更新 raftLog.committed，因为有些 Entry 记录可能在此次复制中被保存到了半数以上的节点中
+				fmt.Printf("herer\n")
 				if r.maybeCommit() {
+					fmt.Printf("herer 1111\n\n")
 					// committed index has progressed for the term, so it is safe
 					// to respond to pending read index requests
 					releasePendingReadIndexMessages(r)
 					//向所有节点发送 MsgApp 消息，注意，此次 MsgApp 消息的 Commit 字段与上次 MsgApp 消息已经不同
-					r.bcastAppend()
+					r.bcastAppend() // 通知所有节点进行数据提交
 				} else if oldPaused {
+					fmt.Printf("herer 22222\n\n")
 					// If we were paused before, this node may be missing the
 					// latest commit index, so send it.
 					//之前是 pause 状态，现在可以任性地发消息了；之前 Leader 节点暂停向该 Follower 节点发送消息，收到 MsgAppResp 消息后，在上述代码中已经重立了相应状态，所以可以继续发送 MsgApp 消息
 					r.sendAppend(m.From)
 				}
+				fmt.Printf("herer 3333\n\n")
 				// We've updated flow control information above, which may
 				// allow us to send multiple (size-limited) in-flight messages
 				// at once (such as when transitioning from probe to
@@ -1360,6 +1366,7 @@ func stepLeader(r *raft, m pb.Message) error {
 				// we have more entries to send, send as many messages as we
 				// can (without sending empty messages for the commit index)
 				for r.maybeSendAppend(m.From, false) {
+					fmt.Printf("herer 4444\n\n")
 				}
 				// Transfer leadership is in progress.
 				if m.From == r.leadTransferee && pr.Match == r.raftLog.lastIndex() {
@@ -1568,14 +1575,14 @@ func stepFollower(r *raft, m pb.Message) error {
 // 此处消息返回MsgAppResp类型
 func (r *raft) handleAppendEntries(m pb.Message) {
 	debug.WriteLog("raft.raft.handleAppendEntries", fmt.Sprintf("raft deal MsgApp msg, m.Index =%d, r.raftLog.committed=%d", m.Index, r.raftLog.committed), []pb.Message{m})
-	if m.Index < r.raftLog.committed {
+	if m.Index < r.raftLog.committed { // 消息已经同步过
 		r.send(pb.Message{To: m.From, Type: pb.MsgAppResp, Index: r.raftLog.committed})
 		return
 	}
 
 	debug.WriteLog("raft.raft.handleAppendEntries", fmt.Sprintf("%s->MsgAppResp", m.Type), []pb.Message{m})
 	// 此处消息返回MsgAppResp类型
-	if mlastIndex, ok := r.raftLog.maybeAppend(m.Index, m.LogTerm, m.Commit, m.Entries...); ok { // 现将数据写入log，再给leader返回写入成功消息
+	if mlastIndex, ok := r.raftLog.maybeAppend(m.Index, m.LogTerm, m.Commit, m.Entries...); ok { // 根据term及commit检验是否需要写入数据
 		r.send(pb.Message{To: m.From, Type: pb.MsgAppResp, Index: mlastIndex})
 	} else {
 		r.logger.Debugf("%x [logterm: %d, index: %d] rejected MsgApp [logterm: %d, index: %d] from %x",

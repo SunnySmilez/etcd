@@ -7,6 +7,12 @@ import (
 )
 
 func WriteLog(funcName string, actionDetail string, msgs []pb.Message) {
+	if msgs == nil {
+		msg := pb.Message{}
+		WritLogElse(funcName, actionDetail, msg)
+		return
+	}
+
 	for _, msg := range msgs {
 		switch msg.Type {
 		case pb.MsgProp:

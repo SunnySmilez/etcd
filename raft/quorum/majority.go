@@ -16,6 +16,7 @@ package quorum
 
 import (
 	"fmt"
+	"go.etcd.io/etcd/raft/v3/debug"
 	"math"
 	"sort"
 	"strings"
@@ -138,9 +139,9 @@ func (c MajorityConfig) CommittedIndex(l AckedIndexer) Index {
 	// replication factor of >7 is rare, and in cases in which it happens
 	// performance is a lesser concern (additionally the performance
 	// implications of an allocation here are far from drastic).
-	var stk [7]uint64
+	var stk [7]uint64 // 固定长度
 	var srt []uint64
-	if len(stk) >= n {
+	if len(stk) >= n { // 按需创建
 		srt = stk[:n]
 	} else {
 		srt = make([]uint64, n)
@@ -152,6 +153,7 @@ func (c MajorityConfig) CommittedIndex(l AckedIndexer) Index {
 		// haven't yet. We fill from the right (since the zeroes will end up on
 		// the left after sorting below anyway).
 		i := n - 1
+		debug.WriteLog("raft.quorum.majority", fmt.Sprintf("c:%+v", c), nil)
 		for id := range c {
 			if idx, ok := l.AckedIndex(id); ok {
 				srt[i] = uint64(idx)
@@ -163,12 +165,12 @@ func (c MajorityConfig) CommittedIndex(l AckedIndexer) Index {
 	// Sort by index. Use a bespoke algorithm (copied from the stdlib's sort
 	// package) to keep srt on the stack.
 	insertionSort(srt)
-
+	debug.WriteLog("raft.quorum.majority", fmt.Sprintf("srt:%+v", srt), nil)
 	// The smallest index into the array for which the value is acked by a
 	// quorum. In other words, from the end of the slice, move n/2+1 to the
 	// left (accounting for zero-indexing).
 	pos := n - (n/2 + 1)
-	return Index(srt[pos])
+	return Index(srt[pos]) // 做好排序后，判断中间的节点的同步位置
 }
 
 // VoteResult takes a mapping of voters to yes/no (true/false) votes and returns

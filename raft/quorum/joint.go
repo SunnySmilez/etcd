@@ -14,6 +14,11 @@
 
 package quorum
 
+import (
+	"fmt"
+	"go.etcd.io/etcd/raft/v3/debug"
+)
+
 // JointConfig is a configuration of two groups of (possibly overlapping)
 // majority configurations. Decisions require the support of both majorities.
 type JointConfig [2]MajorityConfig
@@ -47,8 +52,10 @@ func (c JointConfig) Describe(l AckedIndexer) string {
 // quorum. An index is jointly committed if it is committed in both constituent
 // majorities.
 func (c JointConfig) CommittedIndex(l AckedIndexer) Index {
+	//todo 没看懂
 	idx0 := c[0].CommittedIndex(l)
 	idx1 := c[1].CommittedIndex(l)
+	debug.WriteLog("raft.quorum.joint", fmt.Sprintf("c:%+v, l:%+v", c, l), nil)
 	if idx0 < idx1 {
 		return idx0
 	}
