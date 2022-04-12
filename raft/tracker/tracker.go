@@ -203,12 +203,12 @@ func (p *ProgressTracker) Visit(f func(id uint64, pr *Progress)) {
 	// see there for details.
 	var sl [7]uint64
 	var ids []uint64
-	if len(sl) >= n {
+	if len(sl) >= n { // 按需实例化
 		ids = sl[:n]
 	} else {
 		ids = make([]uint64, n)
 	}
-	for id := range p.Progress {
+	for id := range p.Progress { //获取所有的从节点
 		n--
 		ids[n] = id
 	}

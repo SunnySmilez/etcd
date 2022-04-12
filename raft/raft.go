@@ -83,6 +83,7 @@ type lockedRand struct {
 	rand *rand.Rand
 }
 
+// 加锁范围内返回随机数
 func (r *lockedRand) Intn(n int) int {
 	r.mu.Lock()
 	v := r.rand.Intn(n)
@@ -90,6 +91,7 @@ func (r *lockedRand) Intn(n int) int {
 	return v
 }
 
+// 实例化lockedRand对象
 var globalRand = &lockedRand{
 	rand: rand.New(rand.NewSource(time.Now().UnixNano())),
 }
@@ -102,14 +104,14 @@ type CampaignType string
 // StateType represents the role of a node in a cluster.
 type StateType uint64
 
-var stmap = [...]string{
+var stmap = [...]string{ // 指定和元素相同的长度
 	"StateFollower",
 	"StateCandidate",
 	"StateLeader",
 	"StatePreCandidate",
 }
 
-func (st StateType) String() string {
+func (st StateType) String() string { // 返回状态对应的值
 	return stmap[uint64(st)]
 }
 
@@ -399,8 +401,10 @@ func newRaft(c *Config) *raft {
 // 是否存在lead
 func (r *raft) hasLeader() bool { return r.lead != None }
 
+// softState包含：lead，raftState
 func (r *raft) softState() *SoftState { return &SoftState{Lead: r.lead, RaftState: r.state} }
 
+// hardState包含：term，vote，commit
 func (r *raft) hardState() pb.HardState {
 	return pb.HardState{
 		Term:   r.Term,
@@ -411,7 +415,7 @@ func (r *raft) hardState() pb.HardState {
 
 // send schedules persisting state to a stable storage and AFTER that
 // sending the message (as part of next Ready message processing).
-// 当Type=MsgProp，将数据写入msgs
+// 根据消息类型对term字段做判断，将数据写入raft.msgs
 func (r *raft) send(m pb.Message) {
 	//if m.Type == pb.MsgProp {
 	//fmt.Printf("process:%s, time:%+v, function:%+s, msg:%+v\n", "write msg", time.Now().Unix(), "raft.raft.send", "append msg to raft.msgs")
@@ -421,7 +425,8 @@ func (r *raft) send(m pb.Message) {
 	if m.From == None {
 		m.From = r.id
 	}
-	if m.Type == pb.MsgVote || m.Type == pb.MsgVoteResp || m.Type == pb.MsgPreVote || m.Type == pb.MsgPreVoteResp {
+
+	if m.Type == pb.MsgVote || m.Type == pb.MsgVoteResp || m.Type == pb.MsgPreVote || m.Type == pb.MsgPreVoteResp { // 对应的消息必须存在term字段
 		if m.Term == 0 {
 			// All {pre-,}campaign messages need to have the term set when
 			// sending.
@@ -438,6 +443,7 @@ func (r *raft) send(m pb.Message) {
 			panic(fmt.Sprintf("term should be set when sending %s", m.Type))
 		}
 	} else {
+		// 除上诉消息外term必须为0
 		if m.Term != 0 { // 主发给从的数据才会走这块，理论上是没有term字段的
 			panic(fmt.Sprintf("term should not be set when sending %s (was %d)", m.Type, m.Term))
 		}
@@ -463,9 +469,9 @@ func (r *raft) sendAppend(to uint64) { // 数据发送给别的节点,发送MsgA
 // argument controls whether messages with no entries will be sent
 // ("empty" messages are useful to convey updated Commit indexes, but
 // are undesirable when we're sending multiple messages in a batch).
-// 往flower同步数据
+// 往follower同步数据
 func (r *raft) maybeSendAppend(to uint64, sendIfEmpty bool) bool {
-	pr := r.prs.Progress[to]
+	pr := r.prs.Progress[to] // 获取从节点的信息
 	//fmt.Printf("role:raft,method:maybeSendAppend pr:%+v\n", pr)
 	if pr.IsPaused() { // 判断接收节点状态
 		return false
@@ -474,52 +480,52 @@ func (r *raft) maybeSendAppend(to uint64, sendIfEmpty bool) bool {
 	m.To = to
 
 	//根据当前Leader节点记录的 Next 查找发往指定节点的 Entry 记录（ents）及 Next 索引对应的term值
-	term, errt := r.raftLog.term(pr.Next - 1)
-	ents, erre := r.raftLog.entries(pr.Next, r.maxMsgSize)
-	if len(ents) == 0 && !sendIfEmpty {
+	term, errt := r.raftLog.term(pr.Next - 1)              // 获取对应的数据的term信息，同步的当前msg为pr.next-1（从unstable及storage中获取）
+	ents, erre := r.raftLog.entries(pr.Next, r.maxMsgSize) // 获取需要同步的msgs信息
+	if len(ents) == 0 && !sendIfEmpty {                    // 为空不发送则直接返回
 		return false
 	}
 
-	// 上面两次raftLog查找异常，则发送MsgSnap消息，并将快照发送到指定节点
+	// 获取term or entries异常，则发送MsgSnap消息，并将快照发送到指定节点
 	if errt != nil || erre != nil { // send snapshot if we failed to get term or entries
-		if !pr.RecentActive {
+		if !pr.RecentActive { // 判断当前是否活跃状态
 			r.logger.Debugf("ignore sending snapshot to %x since it is not recently active", to)
 			return false
 		}
 
-		m.Type = pb.MsgSnap
-		snapshot, err := r.raftLog.snapshot()
-		if err != nil {
+		m.Type = pb.MsgSnap                   // 设置消息类型为snap
+		snapshot, err := r.raftLog.snapshot() // 获取raftLog对应的快照信息
+		if err != nil {                       // 获取快照信息异常
 			if err == ErrSnapshotTemporarilyUnavailable {
 				r.logger.Debugf("%x failed to send snapshot to %x because snapshot is temporarily unavailable", r.id, to)
 				return false
 			}
 			panic(err) // TODO(bdarnell)
 		}
-		if IsEmptySnap(snapshot) {
+		if IsEmptySnap(snapshot) { // 快照信息为空
 			panic("need non-empty snapshot")
 		}
-		m.Snapshot = snapshot
-		sindex, sterm := snapshot.Metadata.Index, snapshot.Metadata.Term
+		m.Snapshot = snapshot                                            // 设置快照信息
+		sindex, sterm := snapshot.Metadata.Index, snapshot.Metadata.Term // 获取快照中的index及term
 		r.logger.Debugf("%x [firstindex: %d, commit: %d] sent snapshot[index: %d, term: %d] to %x [%s]",
 			r.id, r.raftLog.firstIndex(), r.raftLog.committed, sindex, sterm, to, pr)
-		pr.BecomeSnapshot(sindex)
+		pr.BecomeSnapshot(sindex) // 设置pr对应的状态信息，修改为发送快照
 		r.logger.Debugf("%x paused sending replication messages to %x [%s]", r.id, to, pr)
-	} else {
-		oldType := m.Type
+	} else { // 获取到了正常的term及entries信息
+		oldType := m.Type //消息原始的type
 		m.Type = pb.MsgApp
-		m.Index = pr.Next - 1
-		m.LogTerm = term
-		m.Entries = ents
+		m.Index = pr.Next - 1 // 消息开始的index
+		m.LogTerm = term      // 消息对应的任期
+		m.Entries = ents      // 消息内容
 		//／设置消息的 Commit 字段， 即当前节点的 raftLog 中最后一条已提交的记录索引值
-		m.Commit = r.raftLog.committed
+		m.Commit = r.raftLog.committed // 主节点提交的位置
 		fmt.Printf("role:raft-leader pr.Inflights:%+v\n", *pr.Inflights)
-		if n := len(m.Entries); n != 0 {
+		if n := len(m.Entries); n != 0 { // 存在同步的消息
 			switch pr.State {
 			// optimistically increase the next when in StateReplicate
-			case tracker.StateReplicate:
-				last := m.Entries[n-1].Index
-				pr.OptimisticUpdate(last) // 设置pr.next的值
+			case tracker.StateReplicate: // 同步信息
+				last := m.Entries[n-1].Index // 获取最后一条消息对应的index值
+				pr.OptimisticUpdate(last)    // 设置主节点对应从节点下次同步消息的位置：pr.next的值
 				pr.Inflights.Add(last)
 			case tracker.StateProbe:
 				pr.ProbeSent = true
@@ -537,11 +543,12 @@ func (r *raft) maybeSendAppend(to uint64, sendIfEmpty bool) bool {
 	debug.WriteLog("raft.raft.maybeSendAppend", "leader deal msg", []pb.Message{m})
 
 	fmt.Printf("leader send msg:%+v\n", m)
-	r.send(m)
+	r.send(m) // 将消息同步到其他节点
 	return true
 }
 
 // sendHeartbeat sends a heartbeat RPC to the given peer.
+// 发送心跳消息
 func (r *raft) sendHeartbeat(to uint64, ctx []byte) {
 	// Attach the commit as min(to.matched, r.committed).
 	// When the leader sends out heartbeat message,
@@ -565,17 +572,17 @@ func (r *raft) sendHeartbeat(to uint64, ctx []byte) {
 func (r *raft) bcastAppend() {
 	//fmt.Printf("process:%s, time:%+v, function:%+s, msg:%+v\n", "write msg", time.Now().Unix(), "raft.raft.bcastAppend", "leader deal msg")
 	debug.WriteLog("raft.raft.bcastAppend", "leader deal msg", nil)
-	// visit会对所有节点发送消息
+	// r.prs.Visit获取所有的从节点，并执行传入的匿名函数
 	r.prs.Visit(func(id uint64, _ *tracker.Progress) {
 		if id == r.id {
 			return
 		}
-		r.sendAppend(id)
+		r.sendAppend(id) // 数据发送给其他节点
 	})
 }
 
 // bcastHeartbeat sends RPC, without entries to all the peers.
-func (r *raft) bcastHeartbeat() {
+func (r *raft) bcastHeartbeat() { // 广播心跳消息
 	lastCtx := r.readOnly.lastPendingRequestCtx()
 	if len(lastCtx) == 0 {
 		r.bcastHeartbeatWithCtx(nil)
@@ -584,7 +591,7 @@ func (r *raft) bcastHeartbeat() {
 	}
 }
 
-func (r *raft) bcastHeartbeatWithCtx(ctx []byte) {
+func (r *raft) bcastHeartbeatWithCtx(ctx []byte) { // 给所有从节点发送心跳消息
 	r.prs.Visit(func(id uint64, _ *tracker.Progress) {
 		if id == r.id {
 			return

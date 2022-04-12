@@ -57,7 +57,7 @@ func (in *Inflights) Clone() *Inflights {
 // dispatched. Full() must be called prior to Add() to verify that there is room
 // for one more message, and consecutive calls to add Add() must provide a
 // monotonic sequence of indexes.
-func (in *Inflights) Add(inflight uint64) {
+func (in *Inflights) Add(inflight uint64) { // 记录待同步的消息的条数
 	if in.Full() { //检测当前 buffer 数组是否已经被填充满了
 		panic("cannot add into a Full inflights")
 	}

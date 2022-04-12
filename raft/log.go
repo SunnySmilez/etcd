@@ -281,7 +281,7 @@ func (l *raftLog) term(i uint64) (uint64, error) {
 	//检测指定的索引值的合法性
 	// the valid term range is [index of dummy entry, last index]
 	dummyIndex := l.firstIndex() - 1
-	if i < dummyIndex || i > l.lastIndex() {
+	if i < dummyIndex || i > l.lastIndex() { // 超过raft.log的范围
 		// TODO: return an error instead?
 		return 0, nil
 	}
