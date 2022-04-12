@@ -47,7 +47,7 @@ type Storage interface {
 	// TODO(tbg): split this into two interfaces, LogStorage and StateStorage.
 
 	// InitialState returns the saved HardState and ConfState information.
-	//集群中每个节点都需要保存一些必需的基本信息，在etcd中将其封装成HardState，其中主要封装了当前任其月号( Term 字段)、当前节点在该任期中将选票投给了哪个节，或( vote 字段)、已提交 Entry记录的位置( Commit 字段，即最后一条己提交记录的索引位)
+	//集群中每个节点都需要保存一些必需的基本信息，在etcd中将其封装成HardState，其中主要封装了当前任期号( Term 字段)、当前节点在该任期中将选票投给了哪个节，或( vote 字段)、已提交 Entry记录的位置( Commit 字段，即最后一条己提交记录的索引位)
 	// ConfState 中封装了当前集群中所有节点的 ID (Nodes 字段)
 	InitialState() (pb.HardState, pb.ConfState, error)
 	// Entries returns a slice of log entries in the range [lo,hi).

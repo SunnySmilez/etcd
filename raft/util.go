@@ -50,6 +50,7 @@ func IsResponseMsg(msgt pb.MessageType) bool {
 }
 
 // voteResponseType maps vote and prevote message types to their corresponding responses.
+// 获取消息对应的回复消息类型
 func voteRespMsgType(msgt pb.MessageType) pb.MessageType {
 	switch msgt {
 	case pb.MsgVote:

@@ -116,7 +116,7 @@ func (l *raftLog) append(ents ...pb.Entry) uint64 {
 	if len(ents) == 0 {
 		return l.lastIndex()
 	}
-	if after := ents[0].Index - 1; after < l.committed {
+	if after := ents[0].Index - 1; after < l.committed { // 第一条未提交的消息的索引必须大于提交索引的值
 		l.logger.Panicf("after(%d) is out of range [committed(%d)]", after, l.committed)
 	}
 	l.unstable.truncateAndAppend(ents)
@@ -342,6 +342,7 @@ func (l *raftLog) matchTerm(i, term uint64) bool {
 	return t == term
 }
 
+// 判断同步的数目，尝试修改raftLog的commited的值
 func (l *raftLog) maybeCommit(maxIndex, term uint64) bool {
 	debug.WriteLog("raft.log.maybeCommit", fmt.Sprintf("maxIndex:%+v, l:%+v", maxIndex, l), nil)
 	if maxIndex > l.committed && l.zeroTermOnErrCompacted(l.term(maxIndex)) == term { // 中间节点的提交记录大于当前已提交的记录，说明过半数的节点已经完成了提交

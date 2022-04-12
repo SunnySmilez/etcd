@@ -265,6 +265,7 @@ func (p *ProgressTracker) ResetVotes() {
 
 // RecordVote records that the node with the given id voted for this Raft
 // instance if v == true (and declined it otherwise).
+// 记录投票信息
 func (p *ProgressTracker) RecordVote(id uint64, v bool) {
 	_, ok := p.Votes[id]
 	if !ok {
@@ -280,7 +281,7 @@ func (p *ProgressTracker) TallyVotes() (granted int, rejected int, _ quorum.Vote
 	// matter in the way the numbers are used (they're informational), but might
 	// as well get it right.
 	for id, pr := range p.Progress {
-		if pr.IsLearner {
+		if pr.IsLearner { //  learner不参与投票
 			continue
 		}
 		v, voted := p.Votes[id]
@@ -288,9 +289,9 @@ func (p *ProgressTracker) TallyVotes() (granted int, rejected int, _ quorum.Vote
 			continue
 		}
 		if v {
-			granted++
+			granted++ // 赞同数
 		} else {
-			rejected++
+			rejected++ // 反对数
 		}
 	}
 	result := p.Voters.VoteResult(p.Votes)

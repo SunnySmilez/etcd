@@ -41,6 +41,25 @@ func TestString(t *testing.T) {
 	fmt.Print(n.String())
 }
 
+func TestFuncMoreParams(t *testing.T) {
+	type a struct {
+		Name string
+	}
+
+	f := func(p ...a) {
+		for i := range p {
+			print(i)
+			print(p[i].Name)
+		}
+	}
+
+	//c := []a{
+	c1 := a{Name: "aa"}
+	c2 := a{Name: "bbb"}
+	//}
+	f(c1, c2)
+}
+
 // nextEnts returns the appliable entries and updates the applied index
 func nextEnts(r *raft, s *MemoryStorage) (ents []pb.Entry) {
 	// Transfer all unstable entries to "stable" storage.

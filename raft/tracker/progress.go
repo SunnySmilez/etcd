@@ -30,7 +30,7 @@ import (
 // certain State. All of this isn't ideal.
 type Progress struct {
 	// match对应follower节点当前已经成功复制的entry记录的最大索引值
-	// next记录发送给folower节点下一条日志的索引值
+	// next记录发送给follower节点下一条日志的索引值
 	Match, Next uint64
 	// State defines how the leader should interact with the follower.
 	//
@@ -131,7 +131,7 @@ func (pr *Progress) BecomeProbe() {
 
 // BecomeReplicate transitions into StateReplicate, resetting Next to Match+1.
 func (pr *Progress) BecomeReplicate() {
-	pr.ResetState(StateReplicate)
+	pr.ResetState(StateReplicate) // 设置状态为StateReplicate
 	pr.Next = pr.Match + 1
 }
 
@@ -146,7 +146,7 @@ func (pr *Progress) BecomeSnapshot(snapshoti uint64) {
 // index acked by it. The method returns false if the given n index comes from
 // an outdated message. Otherwise it updates the progress and returns true.
 // 尝试修改match和next的值，标识对应节点entry记录复制情况
-// leader在自身追加raftlog中追加记录时（appendEntry）以及收到follower节点的MsgAppResp消息时会调用该方法
+// leader在自身追加raftLog中追加记录时（appendEntry）以及收到follower节点的MsgAppResp消息时会调用该方法
 func (pr *Progress) MaybeUpdate(n uint64) bool {
 	debug.WriteLog("tracker.progress.MaybeUpdate", fmt.Sprintf("pr.match=%d, n=%d", pr.Match, n), nil)
 	var updated bool
@@ -155,7 +155,7 @@ func (pr *Progress) MaybeUpdate(n uint64) bool {
 		updated = true
 		pr.ProbeAcked()
 	}
-	pr.Next = max(pr.Next, n+1) //／移动 Next 字段，下次妥复制的 Entry 记录从 Next 开始
+	pr.Next = max(pr.Next, n+1) //／移动 Next 字段，下次复制的 Entry 记录从 Next 开始
 	return updated
 }
 
