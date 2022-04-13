@@ -924,13 +924,14 @@ func (r *raft) Step(m pb.Message) error {
 	if m.Type != pb.MsgHeartbeat && m.Type != pb.MsgBeat {
 		debug.WriteLog("raft.raft.Step", fmt.Sprintf("raft deal msg, r.Term=%d, m.Term=%d, m.Type=%s", r.Term, m.Term, m.Type), []pb.Message{m})
 	}
+	// 针对term的一堆判断，判断是选举还是心跳等操作
 	switch { // 正常收发消息都是m.Term=r.Term
 	case m.Term == 0: // 本地消息不做任何处理
 		// local message
-	case m.Term > r.Term:
+	case m.Term > r.Term: // 选举的时候才会term+1，新leader发送数据term比raftLog的term大1
 		if m.Type == pb.MsgVote || m.Type == pb.MsgPreVote {
-			force := bytes.Equal(m.Context, []byte(campaignTransfer))
-			inLease := r.checkQuorum && r.lead != None && r.electionElapsed < r.electionTimeout
+			force := bytes.Equal(m.Context, []byte(campaignTransfer))                           // todo 没看懂
+			inLease := r.checkQuorum && r.lead != None && r.electionElapsed < r.electionTimeout // 未超时且存在leader节点，理论不需要选举
 			if !force && inLease {
 				// If a server receives a RequestVote request within the minimum election timeout
 				// of hearing from a current leader, it does not update its term or grant its vote
@@ -951,15 +952,15 @@ func (r *raft) Step(m pb.Message) error {
 		default:
 			r.logger.Infof("%x [term: %d] received a %s message with higher term from %x [term: %d]",
 				r.id, r.Term, m.Type, m.From, m.Term)
-			if m.Type == pb.MsgApp || m.Type == pb.MsgHeartbeat || m.Type == pb.MsgSnap {
+			if m.Type == pb.MsgApp || m.Type == pb.MsgHeartbeat || m.Type == pb.MsgSnap { // leader发送给follower的消息，心跳消息，快照消息（这三种消息都是leader发送给follower的消息）
 				r.becomeFollower(m.Term, m.From)
 			} else {
 				r.becomeFollower(m.Term, None)
 			}
 		}
 
-	case m.Term < r.Term:
-		if (r.checkQuorum || r.preVote) && (m.Type == pb.MsgHeartbeat || m.Type == pb.MsgApp) {
+	case m.Term < r.Term: // 消息term已经大于raftLog的term
+		if (r.checkQuorum || r.preVote) && (m.Type == pb.MsgHeartbeat || m.Type == pb.MsgApp) { // 仅针对心跳和leader发送给follower的消息才进行响应
 			// We have received messages from a leader at a lower term. It is possible
 			// that these messages were simply delayed in the network, but this could
 			// also mean that this node has advanced its term number during a network
@@ -982,7 +983,7 @@ func (r *raft) Step(m pb.Message) error {
 			// However, this disruption is inevitable to free this stuck node with
 			// fresh election. This can be prevented with Pre-Vote phase.
 			r.send(pb.Message{To: m.From, Type: pb.MsgAppResp}) // 此处会把MsgApp的类型定义为MsgAppResp类型
-		} else if m.Type == pb.MsgPreVote {
+		} else if m.Type == pb.MsgPreVote { //失败的PreVote消息，主已经选举出来
 			// Before Pre-Vote enable, there may have candidate with higher term,
 			// but less log. After update to Pre-Vote, the cluster may deadlock if
 			// we drop messages with a lower term.
@@ -998,22 +999,22 @@ func (r *raft) Step(m pb.Message) error {
 	}
 
 	switch m.Type {
-	case pb.MsgHup:
+	case pb.MsgHup: // 发起选举
 		if r.preVote {
 			r.hup(campaignPreElection)
 		} else {
 			r.hup(campaignElection)
 		}
 
-	case pb.MsgVote, pb.MsgPreVote:
+	case pb.MsgVote, pb.MsgPreVote: // 预选举或选举消息
 		// We can vote if this is a repeat of a vote we've already cast...
-		canVote := r.Vote == m.From ||
+		canVote := r.Vote == m.From || //已经选举发送消息的节点为leader节点
 			// ...we haven't voted and we don't think there's a leader yet in this term...
-			(r.Vote == None && r.lead == None) ||
+			(r.Vote == None && r.lead == None) || // 还未进行选举
 			// ...or this is a PreVote for a future term...
-			(m.Type == pb.MsgPreVote && m.Term > r.Term)
+			(m.Type == pb.MsgPreVote && m.Term > r.Term) // 进行pre选举
 		// ...and we believe the candidate is up to date.
-		if canVote && r.raftLog.isUpToDate(m.Index, m.LogTerm) {
+		if canVote && r.raftLog.isUpToDate(m.Index, m.LogTerm) { // r.raftLog.isUpToDate 判断term更大或者msg中index更大
 			// Note: it turns out that that learners must be allowed to cast votes.
 			// This seems counter- intuitive but is necessary in the situation in which
 			// a learner has been promoted (i.e. is now a voter) but has not learned
@@ -1043,8 +1044,8 @@ func (r *raft) Step(m pb.Message) error {
 			// the message (it ignores all out of date messages).
 			// The term in the original message and current local term are the
 			// same in the case of regular votes, but different for pre-votes.
-			r.send(pb.Message{To: m.From, Term: m.Term, Type: voteRespMsgType(m.Type)})
-			if m.Type == pb.MsgVote {
+			r.send(pb.Message{To: m.From, Term: m.Term, Type: voteRespMsgType(m.Type)}) // 发送voteResp/votePreResp消息
+			if m.Type == pb.MsgVote {                                                   // 给from节点投票
 				// Only record real votes.
 				r.electionElapsed = 0
 				r.Vote = m.From
@@ -1052,7 +1053,7 @@ func (r *raft) Step(m pb.Message) error {
 		} else {
 			r.logger.Infof("%x [logterm: %d, index: %d, vote: %x] rejected %s from %x [logterm: %d, index: %d] at term %d",
 				r.id, r.raftLog.lastTerm(), r.raftLog.lastIndex(), r.Vote, m.Type, m.From, m.LogTerm, m.Index, r.Term)
-			r.send(pb.Message{To: m.From, Term: r.Term, Type: voteRespMsgType(m.Type), Reject: true})
+			r.send(pb.Message{To: m.From, Term: r.Term, Type: voteRespMsgType(m.Type), Reject: true}) // 不进行投票
 		}
 
 	default:
@@ -1060,6 +1061,7 @@ func (r *raft) Step(m pb.Message) error {
 			fmt.Printf("role:raft,MsgProp run here, r.step:%+v\n", r.step)
 		}
 
+		// 按角色处理对应消息
 		err := r.step(r, m) // 如何知道注册的是那个step函数？ 初始化的时候注册的函数
 		if err != nil {
 			return err
@@ -1074,10 +1076,10 @@ type stepFunc func(r *raft, m pb.Message) error
 func stepLeader(r *raft, m pb.Message) error {
 	// These message types do not require any progress for m.From.
 	switch m.Type {
-	case pb.MsgBeat:
+	case pb.MsgBeat: // 广播心跳消息
 		r.bcastHeartbeat()
 		return nil
-	case pb.MsgCheckQuorum:
+	case pb.MsgCheckQuorum: // Leader检测是否保持半数以上的连接
 		// The leader should always see itself as active. As a precaution, handle
 		// the case in which the leader isn't in the configuration any more (for
 		// example if it just removed itself).
@@ -1099,20 +1101,20 @@ func stepLeader(r *raft, m pb.Message) error {
 			}
 		})
 		return nil
-	case pb.MsgProp:
+	case pb.MsgProp: //client发送给leader的消息
 		//fmt.Printf("process:%s, time:%+v, function:%+s, msg:%+v\n", "write msg", time.Now().Unix(), "raft.raft.stepLeader", "leader deal msg")
 		debug.WriteLog("raft.raft.stepLeader", "leader deal msg", []pb.Message{m})
 		//fmt.Printf("role:raft-leader, raft:%+v\n message:%+v\n", r, m)
-		if len(m.Entries) == 0 {
+		if len(m.Entries) == 0 { // ents为空
 			r.logger.Panicf("%x stepped empty MsgProp", r.id)
 		}
-		if r.prs.Progress[r.id] == nil {
+		if r.prs.Progress[r.id] == nil { // 不存在从节点
 			// If we are not currently a member of the range (i.e. this node
 			// was removed from the configuration while serving as leader),
 			// drop any new proposals.
 			return ErrProposalDropped
 		}
-		if r.leadTransferee != None {
+		if r.leadTransferee != None { // 正在进行leader节点选举
 			r.logger.Debugf("%x [term %d] transfer leadership to %x is in progress; dropping proposal", r.id, r.Term, r.leadTransferee)
 			return ErrProposalDropped
 		}
@@ -1120,6 +1122,7 @@ func stepLeader(r *raft, m pb.Message) error {
 		for i := range m.Entries { // 写入数据
 			e := &m.Entries[i]
 			var cc pb.ConfChangeI
+			// 处理集群信息变更类消息
 			if e.Type == pb.EntryConfChange { //这里应该是集群信息变更
 				fmt.Printf("role:raft-leader,e.Type == pb.EntryConfChange")
 				var ccc pb.ConfChange
@@ -1137,6 +1140,7 @@ func stepLeader(r *raft, m pb.Message) error {
 			}
 			fmt.Printf("role:raft-leader,cc:%+v\n", cc)
 			if cc != nil {
+				// todo 不是太理解场景
 				alreadyPending := r.pendingConfIndex > r.raftLog.applied
 				alreadyJoint := len(r.prs.Config.Voters[1]) > 0
 				wantsLeaveJoint := len(cc.AsV2().Changes) == 0
@@ -1159,28 +1163,28 @@ func stepLeader(r *raft, m pb.Message) error {
 			}
 		}
 
-		if !r.appendEntry(m.Entries...) {
+		if !r.appendEntry(m.Entries...) { // 添加消息
 			return ErrProposalDropped
 		}
-		r.bcastAppend()
+		r.bcastAppend() // 广播消息
 		return nil
-	case pb.MsgReadIndex:
+	case pb.MsgReadIndex: // 客户端发送的只读消息
 		// only one voting member (the leader) in the cluster
-		if r.prs.IsSingleton() {
+		if r.prs.IsSingleton() { // 只有一个投票节点
 			if resp := r.responseToReadIndexReq(m, r.raftLog.committed); resp.To != None {
-				r.send(resp)
+				r.send(resp) //发送消息
 			}
 			return nil
 		}
 
 		// Postpone read only request when this leader has not committed
 		// any log entry at its term.
-		if !r.committedEntryInCurrentTerm() {
+		if !r.committedEntryInCurrentTerm() { // 比对term值
 			r.pendingReadIndexMessages = append(r.pendingReadIndexMessages, m)
 			return nil
 		}
 
-		sendMsgReadIndexResponse(r, m)
+		sendMsgReadIndexResponse(r, m) //发送只读消息的响应信息
 
 		return nil
 	}
@@ -1848,13 +1852,14 @@ func (r *raft) abortLeaderTransfer() {
 
 // committedEntryInCurrentTerm return true if the peer has committed an entry in its term.
 func (r *raft) committedEntryInCurrentTerm() bool {
+	//比对最后一条commit日志的term与raftLog的term值
 	return r.raftLog.zeroTermOnErrCompacted(r.raftLog.term(r.raftLog.committed)) == r.Term
 }
 
 // responseToReadIndexReq constructs a response for `req`. If `req` comes from the peer
 // itself, a blank value will be returned.
 func (r *raft) responseToReadIndexReq(req pb.Message, readIndex uint64) pb.Message {
-	if req.From == None || req.From == r.id {
+	if req.From == None || req.From == r.id { // 本地消息||当前节点 直接移动readState位置
 		r.readStates = append(r.readStates, ReadState{
 			Index:      readIndex,
 			RequestCtx: req.Entries[0].Data,
