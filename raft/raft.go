@@ -1498,24 +1498,24 @@ func stepCandidate(r *raft, m pb.Message) error {
 	case pb.MsgApp:
 		r.becomeFollower(m.Term, m.From) // always m.Term == r.Term
 		r.handleAppendEntries(m)
-	case pb.MsgHeartbeat:
+	case pb.MsgHeartbeat: // 已选主
 		r.becomeFollower(m.Term, m.From) // always m.Term == r.Term
 		r.handleHeartbeat(m)
-	case pb.MsgSnap:
+	case pb.MsgSnap: // 已选主
 		r.becomeFollower(m.Term, m.From) // always m.Term == r.Term
 		r.handleSnapshot(m)
-	case myVoteRespType:
-		gr, rj, res := r.poll(m.From, m.Type, !m.Reject)
+	case myVoteRespType: // 投票
+		gr, rj, res := r.poll(m.From, m.Type, !m.Reject) // 统计是否过半
 		r.logger.Infof("%x has received %d %s votes and %d vote rejections", r.id, gr, m.Type, rj)
 		switch res {
 		case quorum.VoteWon:
-			if r.state == StatePreCandidate {
-				r.campaign(campaignElection)
-			} else {
-				r.becomeLeader()
+			if r.state == StatePreCandidate { // preCandidate则发起candidate竞选
+				r.campaign(campaignElection) // 发起竞选
+			} else { // 此处candidate获取过半投票，变为leader
+				r.becomeLeader() // 成为leader
 				r.bcastAppend()
 			}
-		case quorum.VoteLost:
+		case quorum.VoteLost: // 失败则变为follower
 			// pb.MsgPreVoteResp contains future term of pre-candidate
 			// m.Term > r.Term; reuse r.Term
 			r.becomeFollower(r.Term, None)
@@ -1529,7 +1529,7 @@ func stepCandidate(r *raft, m pb.Message) error {
 // 此处处理从的数据
 func stepFollower(r *raft, m pb.Message) error {
 	switch m.Type {
-	case pb.MsgProp:
+	case pb.MsgProp: // 发送给leader
 		fmt.Printf("role:raft, raft:%+v\n message:%+v\n", r, m)
 		//fmt.Printf("process:%s, time:%+v, function:%+s, follower deal msg:%+v\n", "write msg", time.Now().Unix(), "raft.raft.stepFollower", m)
 		ms := []pb.Message{}
@@ -1543,39 +1543,39 @@ func stepFollower(r *raft, m pb.Message) error {
 		}
 		m.To = r.lead // 数据写入主
 		r.send(m)     // 主写数据
-	case pb.MsgApp:
+	case pb.MsgApp: //处理leader发送过来的消息
 		r.electionElapsed = 0
 		r.lead = m.From
 		r.handleAppendEntries(m)
-	case pb.MsgHeartbeat:
+	case pb.MsgHeartbeat: // 心跳消息处理
 		r.electionElapsed = 0
 		r.lead = m.From
 		r.handleHeartbeat(m)
-	case pb.MsgSnap:
+	case pb.MsgSnap: // 快照消息处理
 		r.electionElapsed = 0
 		r.lead = m.From
 		r.handleSnapshot(m)
-	case pb.MsgTransferLeader:
+	case pb.MsgTransferLeader: // 选主
 		if r.lead == None {
 			r.logger.Infof("%x no leader at term %d; dropping leader transfer msg", r.id, r.Term)
 			return nil
 		}
 		m.To = r.lead
 		r.send(m)
-	case pb.MsgTimeoutNow:
+	case pb.MsgTimeoutNow: //超时
 		r.logger.Infof("%x [term %d] received MsgTimeoutNow from %x and starts an election to get leadership.", r.id, r.Term, m.From)
 		// Leadership transfers never use pre-vote even if r.preVote is true; we
 		// know we are not recovering from a partition so there is no need for the
 		// extra round trip.
 		r.hup(campaignTransfer)
-	case pb.MsgReadIndex:
+	case pb.MsgReadIndex: // 只读消息
 		if r.lead == None {
 			r.logger.Infof("%x no leader at term %d; dropping index reading msg", r.id, r.Term)
 			return nil
 		}
 		m.To = r.lead
 		r.send(m)
-	case pb.MsgReadIndexResp:
+	case pb.MsgReadIndexResp: // 只读消息回复
 		if len(m.Entries) != 1 {
 			r.logger.Errorf("%x invalid format of MsgReadIndexResp from %x, entries count: %d", r.id, m.From, len(m.Entries))
 			return nil
@@ -1650,10 +1650,10 @@ func (r *raft) handleSnapshot(m pb.Message) {
 // configuration of state machine. If this method returns false, the snapshot was
 // ignored, either because it was obsolete or because of an error.
 func (r *raft) restore(s pb.Snapshot) bool {
-	if s.Metadata.Index <= r.raftLog.committed {
+	if s.Metadata.Index <= r.raftLog.committed { // 当前快照消息已经过时（index小于raftLog的committed）
 		return false
 	}
-	if r.state != StateFollower {
+	if r.state != StateFollower { // 不是folower，要么是新加入的，要么是选举失败的，此时直接变为follower节点即可
 		// This is defense-in-depth: if the leader somehow ended up applying a
 		// snapshot, it could move into a new term without moving into a
 		// follower state. This should never fire, but if it did, we'd have
@@ -1670,8 +1670,9 @@ func (r *raft) restore(s pb.Snapshot) bool {
 	// config. This shouldn't ever happen (at the time of writing) but lots of
 	// code here and there assumes that r.id is in the progress tracker.
 	found := false
-	cs := s.Metadata.ConfState
+	cs := s.Metadata.ConfState // 快照中的配置信息
 
+	// 寻找主节点
 	for _, set := range [][]uint64{
 		cs.Voters,
 		cs.Learners,
@@ -1689,7 +1690,7 @@ func (r *raft) restore(s pb.Snapshot) bool {
 			break
 		}
 	}
-	if !found {
+	if !found { // 不存子啊主节点
 		r.logger.Warningf(
 			"%x attempted to restore snapshot but it is not in the ConfState %v; should never happen",
 			r.id, cs,
@@ -1699,18 +1700,19 @@ func (r *raft) restore(s pb.Snapshot) bool {
 
 	// Now go ahead and actually restore.
 
-	if r.raftLog.matchTerm(s.Metadata.Index, s.Metadata.Term) {
+	if r.raftLog.matchTerm(s.Metadata.Index, s.Metadata.Term) { // 匹配快照中当前记录的term及raftLog当前idex对应消息的term值
 		r.logger.Infof("%x [commit: %d, lastindex: %d, lastterm: %d] fast-forwarded commit to snapshot [index: %d, term: %d]",
 			r.id, r.raftLog.committed, r.raftLog.lastIndex(), r.raftLog.lastTerm(), s.Metadata.Index, s.Metadata.Term)
 		r.raftLog.commitTo(s.Metadata.Index)
 		return false
 	}
 
+	// 将raftLog及unstable中的数据以快照数据为准
 	r.raftLog.restore(s)
 
 	// Reset the configuration and add the (potentially updated) peers in anew.
 	r.prs = tracker.MakeProgressTracker(r.prs.MaxInflight)
-	cfg, prs, err := confchange.Restore(confchange.Changer{
+	cfg, prs, err := confchange.Restore(confchange.Changer{ // todo 应该是重置配置信息
 		Tracker:   r.prs,
 		LastIndex: r.raftLog.lastIndex(),
 	}, cs)
@@ -1721,9 +1723,10 @@ func (r *raft) restore(s pb.Snapshot) bool {
 		panic(fmt.Sprintf("unable to restore config %+v: %s", cs, err))
 	}
 
-	assertConfStatesEquivalent(r.logger, cs, r.switchToConfig(cfg, prs))
+	assertConfStatesEquivalent(r.logger, cs, r.switchToConfig(cfg, prs)) //比较配置是否相等
 
 	pr := r.prs.Progress[r.id]
+	//修改match及next的值
 	pr.MaybeUpdate(pr.Next - 1) // TODO(tbg): this is untested and likely unneeded
 
 	r.logger.Infof("%x [commit: %d, lastindex: %d, lastterm: %d] restored snapshot [index: %d, term: %d]",

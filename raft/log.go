@@ -358,8 +358,8 @@ func (l *raftLog) maybeCommit(maxIndex, term uint64) bool {
 
 func (l *raftLog) restore(s pb.Snapshot) {
 	l.logger.Infof("log [%s] starts to restore snapshot [index: %d, term: %d]", l, s.Metadata.Index, s.Metadata.Term)
-	l.committed = s.Metadata.Index
-	l.unstable.restore(s)
+	l.committed = s.Metadata.Index // raftLog的信息以快照信息为准
+	l.unstable.restore(s)          //unstable中数据存储快照的信息
 }
 
 // slice returns a slice of log entries from lo through hi-1, inclusive.
