@@ -178,7 +178,7 @@ func (pr *Progress) OptimisticUpdate(n uint64) { pr.Next = n + 1 }
 // If the rejection is genuine, Next is lowered sensibly, and the Progress is
 // cleared for sending log entries.
 func (pr *Progress) MaybeDecrTo(rejected, matchHint uint64) bool {
-	if pr.State == StateReplicate {
+	if pr.State == StateReplicate { // 同步消息的状态下
 		// The rejection must be stale if the progress has matched and "rejected"
 		// is smaller than "match".
 		if rejected <= pr.Match { //出现过时的 MsgAppResp 消息 ，直接忽略

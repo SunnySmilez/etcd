@@ -1073,6 +1073,7 @@ func (r *raft) Step(m pb.Message) error {
 type stepFunc func(r *raft, m pb.Message) error
 
 // 此处处理主的数据
+// todo 此方法细看
 func stepLeader(r *raft, m pb.Message) error {
 	// These message types do not require any progress for m.From.
 	switch m.Type {
@@ -1197,7 +1198,7 @@ func stepLeader(r *raft, m pb.Message) error {
 		return nil
 	}
 	debug.WriteLog("raft.raft.stepLeader", "deal MsgAppResp msg", []pb.Message{m})
-	switch m.Type {
+	switch m.Type { //todo 此处得细看
 	case pb.MsgAppResp: // 接收Follower发送的响应消息
 		pr.RecentActive = true
 
@@ -1225,7 +1226,8 @@ func stepLeader(r *raft, m pb.Message) error {
 			r.logger.Debugf("%x received MsgAppResp(rejected, hint: (index %d, term %d)) from %x for index %d",
 				r.id, m.RejectHint, m.LogTerm, m.From, m.Index)
 			nextProbeIdx := m.RejectHint
-			if m.LogTerm > 0 {
+			// 此处term和index不匹配，需要找到分叉处的term值对应的index
+			if m.LogTerm > 0 { // todo：关于logTerm的代码得细读，涉及到机器down机等异常场景
 				// If the follower has an uncommitted log tail, we would end up
 				// probing one by one until we hit the common prefix.
 				//
@@ -1339,7 +1341,9 @@ func stepLeader(r *raft, m pb.Message) error {
 				case pr.State == tracker.StateProbe:
 					pr.BecomeReplicate()
 				//之前由于某些原因， Leader 节点通过发送快照的方式恢复 Follower 节点，但在发送 MsgSnap 消息的过程中， Follower节点恢复，并正常接收了 Leader 节点的 MsgApp 消息，此时会丢弃 MsgSnap 消息，并开始“试探”该 Follower 节点正确的 Match 和 Next 值
+
 				case pr.State == tracker.StateSnapshot && pr.Match >= pr.PendingSnapshot: // 需要进行快照操作
+					//todo 什么情况下pr.state会变成snapShot状态
 
 					// TODO(tbg): we should also enter this branch if a snapshot is
 					// received that is below pr.PendingSnapshot but which makes it
@@ -1353,49 +1357,44 @@ func stepLeader(r *raft, m pb.Message) error {
 					pr.BecomeProbe()
 					pr.BecomeReplicate()
 				case pr.State == tracker.StateReplicate: //数据同步
-					//之前向某个 Follower 节点发送 MsgApp 消息时，会将其相关信息保存到对应的Progress.ins 中，在这里收到相应的 MsgAppResp 响应之后，会将其从 ins 中删除，这样可以实现了限流的效采，避免网络出现延迟时，继续发送消息，从而导致网络更加拥堵
-					pr.Inflights.FreeLE(m.Index)
+					//之前向某个 Follower 节点发送 MsgApp 消息时，会将其相关信息保存到对应的Progress.ins 中，在这里收到相应的 MsgAppResp 响应之后，会将其从 ins 中删除，这样可以实现了限流的效应，避免网络出现延迟时，继续发送消息，从而导致网络更加拥堵
+					pr.Inflights.FreeLE(m.Index) // 删除已经接收到的消息
 				}
 
 				//收到 一 个 Follower 节点的 MsgAppResp 消息之后，除了修改相应的 Match 和 Next 值，还会尝试更新 raftLog.committed，因为有些 Entry 记录可能在此次复制中被保存到了半数以上的节点中
-				fmt.Printf("herer\n")
 				if r.maybeCommit() {
-					fmt.Printf("herer 1111\n\n")
 					// committed index has progressed for the term, so it is safe
 					// to respond to pending read index requests
 					releasePendingReadIndexMessages(r)
 					//向所有节点发送 MsgApp 消息，注意，此次 MsgApp 消息的 Commit 字段与上次 MsgApp 消息已经不同
 					r.bcastAppend() // 通知所有节点进行数据提交
-				} else if oldPaused {
-					fmt.Printf("herer 22222\n\n")
+				} else if oldPaused { // 之前处于pause状态，未发送消息
 					// If we were paused before, this node may be missing the
 					// latest commit index, so send it.
 					//之前是 pause 状态，现在可以任性地发消息了；之前 Leader 节点暂停向该 Follower 节点发送消息，收到 MsgAppResp 消息后，在上述代码中已经重立了相应状态，所以可以继续发送 MsgApp 消息
 					r.sendAppend(m.From)
 				}
-				fmt.Printf("herer 3333\n\n")
 				// We've updated flow control information above, which may
 				// allow us to send multiple (size-limited) in-flight messages
 				// at once (such as when transitioning from probe to
 				// replicate, or when freeTo() covers multiple messages). If
 				// we have more entries to send, send as many messages as we
 				// can (without sending empty messages for the commit index)
-				for r.maybeSendAppend(m.From, false) {
-					fmt.Printf("herer 4444\n\n")
+				for r.maybeSendAppend(m.From, false) { // 发送r.ents中的消息
 				}
 				// Transfer leadership is in progress.
-				if m.From == r.leadTransferee && pr.Match == r.raftLog.lastIndex() {
+				if m.From == r.leadTransferee && pr.Match == r.raftLog.lastIndex() { // leader节点的消息已经发送完成，可以进行选举了
 					r.logger.Infof("%x sent MsgTimeoutNow to %x after received MsgAppResp", r.id, m.From)
 					r.sendTimeoutNow(m.From)
 				}
 			}
 		}
-	case pb.MsgHeartbeatResp:
+	case pb.MsgHeartbeatResp: // 心跳响应消息
 		pr.RecentActive = true
 		pr.ProbeSent = false
 
 		// free one slot for the full inflights window to allow progress.
-		if pr.State == tracker.StateReplicate && pr.Inflights.Full() {
+		if pr.State == tracker.StateReplicate && pr.Inflights.Full() { //队列满了
 			pr.Inflights.FreeFirstOne()
 		}
 		if pr.Match < r.raftLog.lastIndex() {

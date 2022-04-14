@@ -154,7 +154,11 @@ func (l *raftLog) findConflict(ents []pb.Entry) uint64 {
 //
 // The index provided MUST be equal to or less than l.lastIndex(). Invalid
 // inputs log a warning and the input index is returned.
-func (l *raftLog) findConflictByTerm(index uint64, term uint64) uint64 {
+func (l *raftLog) findConflictByTerm(index uint64, term uint64) uint64 { //返回匹配的term值对应的index
+	//   idx        1 2 3 4 5 6 7 8 9
+	//              -----------------
+	//   term (L)   1 3 3 3 3 3 3 3 7
+	//   term (F)   1 3 3 4 4 5 5 5 6
 	if li := l.lastIndex(); index > li {
 		// NB: such calls should not exist, but since there is a straightfoward
 		// way to recover, do it.
