@@ -100,7 +100,7 @@ func (c ConfChangeV2) EnterJoint() (autoLeave bool, ok bool) {
 // LeaveJoint is true if the configuration change leaves a joint configuration.
 // This is the case if the ConfChangeV2 is zero, with the possible exception of
 // the Context field.
-func (c ConfChangeV2) LeaveJoint() bool {
+func (c ConfChangeV2) LeaveJoint() bool { // 节点配置复制为空，并判断是否等于v2的配置
 	// NB: c is already a copy.
 	c.Context = nil
 	return proto.Equal(&c, &ConfChangeV2{})

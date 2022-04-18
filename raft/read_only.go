@@ -54,9 +54,9 @@ func newReadOnly(option ReadOnlyOption) *readOnly {
 // `index` is the commit index of the raft state machine when it received
 // the read only request.
 // `m` is the original read only request message from the local or remote node.
-func (ro *readOnly) addRequest(index uint64, m pb.Message) {
+func (ro *readOnly) addRequest(index uint64, m pb.Message) { // 返回readOnly数据格式
 	s := string(m.Entries[0].Data)
-	if _, ok := ro.pendingReadIndex[s]; ok {
+	if _, ok := ro.pendingReadIndex[s]; ok { // 判断消息是否已经存在
 		return
 	}
 	ro.pendingReadIndex[s] = &readIndexStatus{index: index, req: m, acks: make(map[uint64]bool)}

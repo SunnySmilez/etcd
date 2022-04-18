@@ -50,7 +50,9 @@ type ReadOnlyOption int
 const (
 	// ReadOnlySafe guarantees the linearizability of the read only request by
 	// communicating with the quorum. It is the default and suggested option.
+	// todo 通过quorum保证顺序读，默认选项？
 	ReadOnlySafe ReadOnlyOption = iota
+	// 只通过从leader读保证顺序读
 	// ReadOnlyLeaseBased ensures linearizability of the read only request by
 	// relying on the leader lease. It can be affected by clock drift.
 	// If the clock drift is unbounded, leader might keep the lease longer than it
@@ -1742,13 +1744,14 @@ func (r *raft) promotable() bool { //判断哪个机器可以进行leader晋升�
 	return pr != nil && !pr.IsLearner && !r.raftLog.hasPendingSnapshot()
 }
 
+// todo 配置变更相关的代码先不阅读
 func (r *raft) applyConfChange(cc pb.ConfChangeV2) pb.ConfState {
 	cfg, prs, err := func() (tracker.Config, tracker.ProgressMap, error) {
 		changer := confchange.Changer{ //  新配置信息
 			Tracker:   r.prs,
 			LastIndex: r.raftLog.lastIndex(),
 		}
-		if cc.LeaveJoint() {
+		if cc.LeaveJoint() { // 判断配置是否为v2类型
 			return changer.LeaveJoint()
 		} else if autoLeave, ok := cc.EnterJoint(); ok {
 			return changer.EnterJoint(autoLeave, cc.Changes...)
@@ -1770,6 +1773,7 @@ func (r *raft) applyConfChange(cc pb.ConfChangeV2) pb.ConfState {
 // requirements.
 //
 // The inputs usually result from restoring a ConfState or applying a ConfChange.
+// todo conf变更相关代码未阅读
 func (r *raft) switchToConfig(cfg tracker.Config, prs tracker.ProgressMap) pb.ConfState {
 	r.prs.Config = cfg
 	r.prs.Progress = prs
@@ -1821,7 +1825,7 @@ func (r *raft) switchToConfig(cfg tracker.Config, prs tracker.ProgressMap) pb.Co
 	return cs
 }
 
-func (r *raft) loadState(state pb.HardState) {
+func (r *raft) loadState(state pb.HardState) { // 加载状态信息
 	if state.Commit < r.raftLog.committed || state.Commit > r.raftLog.lastIndex() { // 判断同步数据是否出界（不在raftLog范围内）
 		r.logger.Panicf("%x state.commit %d is out of range [%d, %d]", r.id, state.Commit, r.raftLog.committed, r.raftLog.lastIndex())
 	}
@@ -1840,10 +1844,12 @@ func (r *raft) pastElectionTimeout() bool {
 	return r.electionElapsed >= r.randomizedElectionTimeout
 }
 
+// 重置选举过期时间（electionTimeout<randomizedElectionTimeout<2*electionTimeout）
 func (r *raft) resetRandomizedElectionTimeout() {
 	r.randomizedElectionTimeout = r.electionTimeout + globalRand.Intn(r.electionTimeout)
 }
 
+// 发送超时信息
 func (r *raft) sendTimeoutNow(to uint64) {
 	r.send(pb.Message{To: to, Type: pb.MsgTimeoutNow})
 }
@@ -1854,22 +1860,23 @@ func (r *raft) abortLeaderTransfer() {
 }
 
 // committedEntryInCurrentTerm return true if the peer has committed an entry in its term.
+// 判断raft中的term与最后一条commited记录的term是否相等(实际业务含义是数据已经提交)
 func (r *raft) committedEntryInCurrentTerm() bool {
-	//比对最后一条commit日志的term与raftLog的term值
+	// 比对最后一条commit日志的term与raftLog的term值
 	return r.raftLog.zeroTermOnErrCompacted(r.raftLog.term(r.raftLog.committed)) == r.Term
 }
 
 // responseToReadIndexReq constructs a response for `req`. If `req` comes from the peer
 // itself, a blank value will be returned.
 func (r *raft) responseToReadIndexReq(req pb.Message, readIndex uint64) pb.Message {
-	if req.From == None || req.From == r.id { // 本地消息||当前节点 直接移动readState位置
+	if req.From == None || req.From == r.id { // 本地消息||当前节点 直接移动readState位置，返回空Message
 		r.readStates = append(r.readStates, ReadState{
 			Index:      readIndex,
 			RequestCtx: req.Entries[0].Data,
 		})
 		return pb.Message{}
 	}
-	return pb.Message{
+	return pb.Message{ // 返回响应消息
 		Type:    pb.MsgReadIndexResp,
 		To:      req.From,
 		Index:   readIndex,
@@ -1879,15 +1886,17 @@ func (r *raft) responseToReadIndexReq(req pb.Message, readIndex uint64) pb.Messa
 
 // increaseUncommittedSize computes the size of the proposed entries and
 // determines whether they would push leader over its maxUncommittedSize limit.
+// 计算提案大小，判断是否超过leader的maxUncommittedSize
 // If the new entries would exceed the limit, the method returns false. If not,
 // the increase in uncommitted entry size is recorded and the method returns
 // true.
+// 超过则返回false，不超过就返回true，并记录到entry中
 //
 // Empty payloads are never refused. This is used both for appending an empty
 // entry at a new leader's term, as well as leaving a joint configuration.
 func (r *raft) increaseUncommittedSize(ents []pb.Entry) bool {
 	var s uint64
-	for _, e := range ents {
+	for _, e := range ents { // 计算数据大小
 		s += uint64(PayloadSize(e))
 	}
 
@@ -1907,8 +1916,8 @@ func (r *raft) increaseUncommittedSize(ents []pb.Entry) bool {
 
 // reduceUncommittedSize accounts for the newly committed entries by decreasing
 // the uncommitted entry size limit.
-func (r *raft) reduceUncommittedSize(ents []pb.Entry) {
-	if r.uncommittedSize == 0 {
+func (r *raft) reduceUncommittedSize(ents []pb.Entry) { // 传入的是已经提交的数据，重新计算未提交的数据大小
+	if r.uncommittedSize == 0 { // 不存在未提交的数据，不需要减
 		// Fast-path for followers, who do not track or enforce the limit.
 		return
 	}
@@ -1919,7 +1928,7 @@ func (r *raft) reduceUncommittedSize(ents []pb.Entry) {
 	}
 
 	// 计算未提交的大小，当ents的数据大于uncommittedSize的时候则剩余0，否则计算剩余的大小
-	if s > r.uncommittedSize {
+	if s > r.uncommittedSize { // 已提交的数据大于未提交的数据，返回0
 		// uncommittedSize may underestimate the size of the uncommitted Raft
 		// log tail but will never overestimate it. Saturate at 0 instead of
 		// allowing overflow.
@@ -1929,9 +1938,9 @@ func (r *raft) reduceUncommittedSize(ents []pb.Entry) {
 	}
 }
 
-func numOfPendingConf(ents []pb.Entry) int {
+func numOfPendingConf(ents []pb.Entry) int { // 返回待变更的conf数目
 	n := 0
-	for i := range ents { // 计算类型未conf文件变更的数目
+	for i := range ents { // 计算类型为conf，文件变更的数目
 		if ents[i].Type == pb.EntryConfChange || ents[i].Type == pb.EntryConfChangeV2 {
 			n++
 		}
@@ -1940,31 +1949,34 @@ func numOfPendingConf(ents []pb.Entry) int {
 }
 
 func releasePendingReadIndexMessages(r *raft) {
-	if !r.committedEntryInCurrentTerm() {
+	if !r.committedEntryInCurrentTerm() { // 判断当前数据都已提交
 		r.logger.Error("pending MsgReadIndex should be released only after first commit in current term")
 		return
 	}
 
-	msgs := r.pendingReadIndexMessages
-	r.pendingReadIndexMessages = nil
+	msgs := r.pendingReadIndexMessages // 针对等待读的数据返回响应信息
+	r.pendingReadIndexMessages = nil   // 数据都已经提交了
 
 	for _, m := range msgs {
 		sendMsgReadIndexResponse(r, m)
 	}
 }
 
+// 通过判断readOnly的类型，选择合适的相应方式
+// todo 细读
 func sendMsgReadIndexResponse(r *raft, m pb.Message) {
 	// thinking: use an internally defined context instead of the user given context.
 	// We can express this in terms of the term and index instead of a user-supplied value.
 	// This would allow multiple reads to piggyback on the same message.
-	switch r.readOnly.option {
+	switch r.readOnly.option { // 判断数据读取的方式
 	// If more than the local vote is needed, go through a full broadcast.
 	case ReadOnlySafe:
 		r.readOnly.addRequest(r.raftLog.committed, m)
 		// The local node automatically acks the request.
 		r.readOnly.recvAck(r.id, m.Entries[0].Data)
+		// 响应心跳消息
 		r.bcastHeartbeatWithCtx(m.Entries[0].Data)
-	case ReadOnlyLeaseBased:
+	case ReadOnlyLeaseBased: // 返回相应消息
 		if resp := r.responseToReadIndexReq(m, r.raftLog.committed); resp.To != None {
 			r.send(resp)
 		}
