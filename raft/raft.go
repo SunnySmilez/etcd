@@ -1415,7 +1415,7 @@ func stepLeader(r *raft, m pb.Message) error {
 				r.send(resp)
 			}
 		}
-	case pb.MsgSnapStatus:
+	case pb.MsgSnapStatus: // 快照
 		if pr.State != tracker.StateSnapshot {
 			return nil
 		}
@@ -1437,14 +1437,14 @@ func stepLeader(r *raft, m pb.Message) error {
 		// out the next MsgApp.
 		// If snapshot failure, wait for a heartbeat interval before next try
 		pr.ProbeSent = true
-	case pb.MsgUnreachable:
+	case pb.MsgUnreachable: // follower消息不可达
 		// During optimistic replication, if the remote becomes unreachable,
 		// there is huge probability that a MsgApp is lost.
 		if pr.State == tracker.StateReplicate {
 			pr.BecomeProbe()
 		}
 		r.logger.Debugf("%x failed to send message to %x because it is unreachable [%s]", r.id, m.From, pr)
-	case pb.MsgTransferLeader:
+	case pb.MsgTransferLeader: // 正在替换主
 		if pr.IsLearner {
 			r.logger.Debugf("%x is learner. Ignored transferring leadership", r.id)
 			return nil
@@ -1486,16 +1486,16 @@ func stepCandidate(r *raft, m pb.Message) error {
 	// StateCandidate, we may get stale MsgPreVoteResp messages in this term from
 	// our pre-candidate state).
 	var myVoteRespType pb.MessageType
-	if r.state == StatePreCandidate {
+	if r.state == StatePreCandidate { // preCandidate和Candidate走一套逻辑
 		myVoteRespType = pb.MsgPreVoteResp
 	} else {
 		myVoteRespType = pb.MsgVoteResp
 	}
 	switch m.Type {
-	case pb.MsgProp:
+	case pb.MsgProp: // leader才处理MsgProp消息
 		r.logger.Infof("%x no leader at term %d; dropping proposal", r.id, r.Term)
 		return ErrProposalDropped
-	case pb.MsgApp:
+	case pb.MsgApp: //leader发送的消息，说明主已经选好了，直接称为follower
 		r.becomeFollower(m.Term, m.From) // always m.Term == r.Term
 		r.handleAppendEntries(m)
 	case pb.MsgHeartbeat: // 已选主
@@ -1649,6 +1649,7 @@ func (r *raft) handleSnapshot(m pb.Message) {
 // restore recovers the state machine from a snapshot. It restores the log and the
 // configuration of state machine. If this method returns false, the snapshot was
 // ignored, either because it was obsolete or because of an error.
+// 从快照恢复数据
 func (r *raft) restore(s pb.Snapshot) bool {
 	if s.Metadata.Index <= r.raftLog.committed { // 当前快照消息已经过时（index小于raftLog的committed）
 		return false
@@ -1690,7 +1691,7 @@ func (r *raft) restore(s pb.Snapshot) bool {
 			break
 		}
 	}
-	if !found { // 不存子啊主节点
+	if !found { // 不存在主节点
 		r.logger.Warningf(
 			"%x attempted to restore snapshot but it is not in the ConfState %v; should never happen",
 			r.id, cs,
@@ -1736,14 +1737,14 @@ func (r *raft) restore(s pb.Snapshot) bool {
 
 // promotable indicates whether state machine can be promoted to leader,
 // which is true when its own id is in progress list.
-func (r *raft) promotable() bool {
+func (r *raft) promotable() bool { //判断哪个机器可以进行leader晋升：判断日志中的节点存在且不是leader节点，且不存在未持久化的数据（日志是最新的）
 	pr := r.prs.Progress[r.id]
 	return pr != nil && !pr.IsLearner && !r.raftLog.hasPendingSnapshot()
 }
 
 func (r *raft) applyConfChange(cc pb.ConfChangeV2) pb.ConfState {
 	cfg, prs, err := func() (tracker.Config, tracker.ProgressMap, error) {
-		changer := confchange.Changer{
+		changer := confchange.Changer{ //  新配置信息
 			Tracker:   r.prs,
 			LastIndex: r.raftLog.lastIndex(),
 		}

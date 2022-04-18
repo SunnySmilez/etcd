@@ -215,6 +215,7 @@ func (l *raftLog) hasNextEnts() bool {
 }
 
 // hasPendingSnapshot returns if there is pending snapshot waiting for applying.
+//  是否存在快照等待被恢复
 func (l *raftLog) hasPendingSnapshot() bool {
 	return l.unstable.snapshot != nil && !IsEmptySnap(*l.unstable.snapshot)
 }
