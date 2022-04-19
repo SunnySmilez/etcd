@@ -253,7 +253,7 @@ func StartNode(c *Config, peers []Peer) Node {
 	if len(peers) == 0 {
 		panic("no peers given; use RestartNode instead")
 	}
-	rn, err := NewRawNode(c)
+	rn, err := NewRawNode(c) //实例化一个raft
 	if err != nil {
 		panic(err)
 	}
@@ -262,7 +262,7 @@ func StartNode(c *Config, peers []Peer) Node {
 		c.Logger.Warningf("error occurred during starting a new node: %v", err)
 	}
 
-	n := newNode(rn)
+	n := newNode(rn) // 初始化各种channel
 
 	fmt.Print("star node \n")
 	go n.run()
@@ -505,6 +505,7 @@ func (n *node) Step(ctx context.Context, m pb.Message) error {
 	return n.step(ctx, m)
 }
 
+// 配置变更消息组装（Message.Type还是MsgProp类型，entry.Type是EntryConfChange）
 func confChangeToMsg(c pb.ConfChangeI) (pb.Message, error) {
 	typ, data, err := pb.MarshalConfChange(c)
 	if err != nil {

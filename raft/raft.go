@@ -362,7 +362,7 @@ func newRaft(c *Config) *raft {
 		raftLog:                   raftlog,
 		maxMsgSize:                c.MaxSizePerMsg,
 		maxUncommittedSize:        c.MaxUncommittedEntriesSize,
-		prs:                       tracker.MakeProgressTracker(c.MaxInflightMsgs),
+		prs:                       tracker.MakeProgressTracker(c.MaxInflightMsgs), // 记录follower节点及日志同步情况
 		electionTimeout:           c.ElectionTick,
 		heartbeatTimeout:          c.HeartbeatTick,
 		logger:                    c.Logger,

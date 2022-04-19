@@ -31,7 +31,7 @@ var ErrStepPeerNotFound = errors.New("raft: cannot step as peer not found")
 // RawNode is a thread-unsafe Node.
 // The methods of this struct correspond to the methods of Node and are described
 // more fully there.
-type RawNode struct { // 是一个不安全的node
+type RawNode struct { // 是一个线程不安全的node
 	raft       *raft
 	prevSoftSt *SoftState
 	prevHardSt pb.HardState
@@ -69,18 +69,19 @@ func (rn *RawNode) Tick() {
 // WARNING: Be very careful about using this method as it subverts the Raft
 // state machine. You should probably be using Tick instead.
 func (rn *RawNode) TickQuiesced() {
+	// 选举时钟计数器
 	rn.raft.electionElapsed++
 }
 
 // Campaign causes this RawNode to transition to candidate state.
 func (rn *RawNode) Campaign() error {
-	return rn.raft.Step(pb.Message{
+	return rn.raft.Step(pb.Message{ // 发送MsgHup消息
 		Type: pb.MsgHup,
 	})
 }
 
 // Propose proposes data be appended to the raft log.
-func (rn *RawNode) Propose(data []byte) error {
+func (rn *RawNode) Propose(data []byte) error { // 发送普通消息
 	return rn.raft.Step(pb.Message{
 		Type: pb.MsgProp,
 		From: rn.raft.id,
@@ -91,7 +92,7 @@ func (rn *RawNode) Propose(data []byte) error {
 
 // ProposeConfChange proposes a config change. See (Node).ProposeConfChange for
 // details.
-func (rn *RawNode) ProposeConfChange(cc pb.ConfChangeI) error {
+func (rn *RawNode) ProposeConfChange(cc pb.ConfChangeI) error { // 配置变更类型消息发送
 	m, err := confChangeToMsg(cc)
 	if err != nil {
 		return err
@@ -102,19 +103,21 @@ func (rn *RawNode) ProposeConfChange(cc pb.ConfChangeI) error {
 // ApplyConfChange applies a config change to the local node. The app must call
 // this when it applies a configuration change, except when it decides to reject
 // the configuration change, in which case no call must take place.
+// 本地节点应用配置信息
 func (rn *RawNode) ApplyConfChange(cc pb.ConfChangeI) *pb.ConfState {
-	cs := rn.raft.applyConfChange(cc.AsV2())
+	cs := rn.raft.applyConfChange(cc.AsV2()) // 选择对应的配置类型进行应用
 	return &cs
 }
 
 // Step advances the state machine using the given message.
 func (rn *RawNode) Step(m pb.Message) error {
 	// ignore unexpected local messages receiving over network
-	if IsLocalMsg(m.Type) {
+	if IsLocalMsg(m.Type) { // 忽略本地消息类型
 		return ErrStepLocalMsg
 	}
+	// 发送节点是从节点或者不是响应的消息类型（那就是主节点）
 	if pr := rn.raft.prs.Progress[m.From]; pr != nil || !IsResponseMsg(m.Type) {
-		return rn.raft.Step(m)
+		return rn.raft.Step(m) // 发送消息给raft处理
 	}
 	return ErrStepPeerNotFound
 }
@@ -131,6 +134,7 @@ func (rn *RawNode) Ready() Ready {
 
 // readyWithoutAccept returns a Ready. This is a read-only operation, i.e. there
 // is no obligation that the Ready must be handled.
+// 返回一个就绪状态
 func (rn *RawNode) readyWithoutAccept() Ready {
 	return newReady(rn.raft, rn.prevSoftSt, rn.prevHardSt)
 }

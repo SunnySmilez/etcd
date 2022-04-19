@@ -31,6 +31,7 @@ type ConfChangeI interface {
 
 // MarshalConfChange calls Marshal on the underlying ConfChange or ConfChangeV2
 // and returns the result along with the corresponding EntryType.
+// 获取配置变更类型的版本
 func MarshalConfChange(c ConfChangeI) (EntryType, []byte, error) {
 	var typ EntryType
 	var ccdata []byte
