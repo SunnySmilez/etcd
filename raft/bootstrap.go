@@ -31,12 +31,12 @@ func (rn *RawNode) Bootstrap(peers []Peer) error {
 	if len(peers) == 0 {
 		return errors.New("must provide at least one peer to Bootstrap")
 	}
-	lastIndex, err := rn.raft.raftLog.storage.LastIndex()
+	lastIndex, err := rn.raft.raftLog.storage.LastIndex() // 持久化存储的最后一条数据的index值
 	if err != nil {
 		return err
 	}
 
-	if lastIndex != 0 {
+	if lastIndex != 0 { // 已经存在数据
 		return errors.New("can't bootstrap a nonempty Storage")
 	}
 
@@ -47,7 +47,7 @@ func (rn *RawNode) Bootstrap(peers []Peer) error {
 
 	// TODO(tbg): remove StartNode and give the application the right tools to
 	// bootstrap the initial membership in a cleaner way.
-	rn.raft.becomeFollower(1, None)
+	rn.raft.becomeFollower(1, None) // 初始化node事先成为Follower节点，term为1
 	ents := make([]pb.Entry, len(peers))
 	for i, peer := range peers {
 		cc := pb.ConfChange{Type: pb.ConfChangeAddNode, NodeID: peer.ID, Context: peer.Context}
@@ -58,7 +58,7 @@ func (rn *RawNode) Bootstrap(peers []Peer) error {
 
 		ents[i] = pb.Entry{Type: pb.EntryConfChange, Term: 1, Index: uint64(i + 1), Data: data}
 	}
-	rn.raft.raftLog.append(ents...)
+	rn.raft.raftLog.append(ents...) // 将配置变更信息写入到raftLog中
 
 	// Now apply them, mainly so that the application can call Campaign
 	// immediately after StartNode in tests. Note that these nodes will
@@ -72,9 +72,9 @@ func (rn *RawNode) Bootstrap(peers []Peer) error {
 	//
 	// TODO(bdarnell): These entries are still unstable; do we need to preserve
 	// the invariant that committed < unstable?
-	rn.raft.raftLog.committed = uint64(len(ents))
+	rn.raft.raftLog.committed = uint64(len(ents)) // 记录已提交的日志
 	for _, peer := range peers {
-		rn.raft.applyConfChange(pb.ConfChange{NodeID: peer.ID, Type: pb.ConfChangeAddNode}.AsV2())
+		rn.raft.applyConfChange(pb.ConfChange{NodeID: peer.ID, Type: pb.ConfChangeAddNode}.AsV2()) // 应用配置
 	}
 	return nil
 }

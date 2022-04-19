@@ -111,7 +111,7 @@ func (l *raftLog) maybeAppend(index, logTerm, committed uint64, ents ...pb.Entry
 	return 0, false
 }
 
-//通过调用 unstable.truncateAndAppend方法完成 录的追加功能
+//通过调用 unstable.truncateAndAppend方法完成记录的追加功能
 func (l *raftLog) append(ents ...pb.Entry) uint64 {
 	if len(ents) == 0 {
 		return l.lastIndex()

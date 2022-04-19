@@ -38,33 +38,41 @@ var (
 
 // SoftState provides state that is useful for logging and debugging.
 // The state is volatile and does not need to be persisted to the WAL.
+// softState提供状态便于记录日志和debug，该状态不需要持久化到WAL文件
 type SoftState struct {
-	Lead      uint64 // must use atomic operations to access; keep 64-bit aligned.
-	RaftState StateType
+	Lead      uint64    // must use atomic operations to access; keep 64-bit aligned.
+	RaftState StateType // 当前节点的角色
 }
 
-// lead相同并且相同状态
+// lead值及角色都相同（在同一个集群，并且都不是leader）
 func (a *SoftState) equal(b *SoftState) bool {
 	return a.Lead == b.Lead && a.RaftState == b.RaftState
 }
 
 // Ready encapsulates the entries and messages that are ready to read,
+// Ready中封装了可以read的entries和messages
 // be saved to stable storage, committed or sent to other peers.
+// 被保存在持久化存储，提交或者给其他的节点发送
 // All fields in Ready are read-only.
+// 所有Ready中的字段是只读的
 type Ready struct {
 	// The current volatile state of a Node.
 	// SoftState will be nil if there is no update.
 	// It is not required to consume or store SoftState.
+	// 没有更新的时候是nil
 	*SoftState
 
 	// The current state of a Node to be saved to stable storage BEFORE
 	// Messages are sent.
 	// HardState will be equal to empty state if there is no update.
+	// 需要保存到持久化存储的数据
 	pb.HardState
 
 	// ReadStates can be used for node to serve linearizable read requests locally
 	// when its applied index is greater than the index in ReadState.
+	// readStates用于顺序读，当应用的所以大于ReadState中的索引的时候
 	// Note that the readState will be returned when raft receives msgReadIndex.
+	// 在raft收到msgReadIndex的时候readState会被返回
 	// The returned is only valid for the request that requested to read.
 	// 当前节点中等待处理的读请求
 	ReadStates []ReadState
@@ -86,8 +94,10 @@ type Ready struct {
 
 	// Messages specifies outbound messages to be sent AFTER Entries are
 	// committed to stable storage.
+	//
 	// If it contains a MsgSnap message, the application MUST report back to raft
 	// when the snapshot has been received or has failed by calling ReportSnapshot.
+	// 当包含快照消息当时候，当快照已经被接收或者reportSnapshot失败的时候需要通知raft
 	// 待发送到其他节点到信息
 	Messages []pb.Message
 
@@ -103,15 +113,18 @@ func isHardStateEqual(a, b pb.HardState) bool {
 
 // IsEmptyHardState returns true if the given HardState is empty.
 //  term，vote，commit为空
+//  判断hardState是否为空
 func IsEmptyHardState(st pb.HardState) bool {
 	return isHardStateEqual(st, emptyState)
 }
 
+// 判断snap数据为空
 // IsEmptySnap returns true if the given Snapshot is empty.
 func IsEmptySnap(sp pb.Snapshot) bool {
 	return sp.Metadata.Index == 0
 }
 
+// 判断是否需要进行更新操作
 func (rd Ready) containsUpdates() bool {
 	return rd.SoftState != nil || !IsEmptyHardState(rd.HardState) ||
 		!IsEmptySnap(rd.Snapshot) || len(rd.Entries) > 0 ||
@@ -121,7 +134,9 @@ func (rd Ready) containsUpdates() bool {
 // appliedCursor extracts from the Ready the highest index the client has
 // applied (once the Ready is confirmed via Advance). If no information is
 // contained in the Ready, returns zero.
+// 从已提交的记录中/从快照信息中获取最后一条记录的index值
 func (rd Ready) appliedCursor() uint64 {
+	// 已经提交到raft持久化存储的数据
 	if n := len(rd.CommittedEntries); n > 0 {
 		return rd.CommittedEntries[n-1].Index
 	}
@@ -135,18 +150,21 @@ func (rd Ready) appliedCursor() uint64 {
 type Node interface {
 	// Tick increments the internal logical clock for the Node by a single tick. Election
 	// timeouts and heartbeat timeouts are in units of ticks.
+	// 定时器
 	Tick()
 	// Campaign causes the Node to transition to candidate state and start campaigning to become leader.
+	// node变成candidate状态，并进行选举
 	Campaign(ctx context.Context) error
 	// Propose proposes that data be appended to the log. Note that proposals can be lost without
 	// notice, therefore it is user's job to ensure proposal retries.
+	// 数据写入到log中，提案会在不被通知的情况下丢失，用户需要进行重试确保提案不丢失
 	Propose(ctx context.Context, data []byte) error
 	// ProposeConfChange proposes a configuration change. Like any proposal, the
 	// configuration change may be dropped with or without an error being
 	// returned. In particular, configuration changes are dropped unless the
 	// leader has certainty that there is no prior unapplied configuration
 	// change in its log.
-	//
+	// 记录的是配置的变更
 	// The method accepts either a pb.ConfChange (deprecated) or pb.ConfChangeV2
 	// message. The latter allows arbitrary configuration changes via joint
 	// consensus, notably including replacing a voter. Passing a ConfChangeV2
@@ -156,6 +174,7 @@ type Node interface {
 	ProposeConfChange(ctx context.Context, cc pb.ConfChangeI) error
 
 	// Step advances the state machine using the given message. ctx.Err() will be returned, if any.
+	// 状态机的操作
 	Step(ctx context.Context, msg pb.Message) error
 
 	// Ready returns a channel that returns the current point-in-time state.
@@ -200,6 +219,7 @@ type Node interface {
 	// Status returns the current status of the raft state machine.
 	Status() Status
 	// ReportUnreachable reports the given node is not reachable for the last send.
+	// 通知最后一条发送达消息不可达
 	ReportUnreachable(id uint64)
 	// ReportSnapshot reports the status of the sent snapshot. The id is the raft ID of the follower
 	// who is meant to receive the snapshot, and the status is SnapshotFinish or SnapshotFailure.
@@ -211,11 +231,14 @@ type Node interface {
 	// updates from the leader. Therefore, it is crucial that the application ensures that any
 	// failure in snapshot sending is caught and reported back to the leader; so it can resume raft
 	// log probing in the follower.
+	// 报告快照完成的情况，应用/应用失败。id是followe节点的id
+	// 快照是leader->follower。follower应用快照信息，失败了向leader进行报告
 	ReportSnapshot(id uint64, status SnapshotStatus)
 	// Stop performs any necessary termination of the Node.
 	Stop()
 }
 
+// 集群中除自身外的其他节点
 type Peer struct {
 	ID      uint64
 	Context []byte
@@ -225,6 +248,7 @@ type Peer struct {
 // It appends a ConfChangeAddNode entry for each given peer to the initial log.
 //
 // Peers must not be zero length; call RestartNode in that case.
+// 启动节点：根据给定的配置及peer启动节点
 func StartNode(c *Config, peers []Peer) Node {
 	if len(peers) == 0 {
 		panic("no peers given; use RestartNode instead")
