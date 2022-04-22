@@ -167,6 +167,7 @@ type matchAckIndexer map[uint64]*Progress
 var _ quorum.AckedIndexer = matchAckIndexer(nil)
 
 // AckedIndex implements IndexLookuper.
+//判断是否存在，并转换类型
 func (l matchAckIndexer) AckedIndex(id uint64) (quorum.Index, bool) {
 	pr, ok := l[id]
 	if !ok {

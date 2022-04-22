@@ -156,16 +156,16 @@ func (rn *RawNode) acceptReady(rd Ready) {
 // Checking logic in this method should be consistent with Ready.containsUpdates().
 func (rn *RawNode) HasReady() bool {
 	r := rn.raft
-	if !r.softState().equal(rn.prevSoftSt) {
+	if !r.softState().equal(rn.prevSoftSt) { // 非软状态
 		return true
 	}
-	if hardSt := r.hardState(); !IsEmptyHardState(hardSt) && !isHardStateEqual(hardSt, rn.prevHardSt) {
+	if hardSt := r.hardState(); !IsEmptyHardState(hardSt) && !isHardStateEqual(hardSt, rn.prevHardSt) { // 已经进入了下一轮term
 		return true
 	}
-	if r.raftLog.hasPendingSnapshot() {
+	if r.raftLog.hasPendingSnapshot() { // 存在等待的快照
 		return true
 	}
-	if len(r.msgs) > 0 || len(r.raftLog.unstableEntries()) > 0 || r.raftLog.hasNextEnts() {
+	if len(r.msgs) > 0 || len(r.raftLog.unstableEntries()) > 0 || r.raftLog.hasNextEnts() { // 存在未处理的消息
 		return true
 	}
 	if len(r.readStates) != 0 {

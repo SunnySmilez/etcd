@@ -645,7 +645,7 @@ func (n *node) ReadIndex(ctx context.Context, rctx []byte) error {
 }
 
 // 此处节点会将数据写入到ready中（curl写入的节点）
-func newReady(r *raft, prevSoftSt *SoftState, prevHardSt pb.HardState) Ready {
+func newReady(r *raft, prevSoftSt *SoftState, prevHardSt pb.HardState) Ready { // 将消息写入到ready中
 	rd := Ready{
 		Entries:          r.raftLog.unstableEntries(),
 		CommittedEntries: r.raftLog.nextEnts(),
