@@ -488,7 +488,7 @@ func (r *raft) maybeSendAppend(to uint64, sendIfEmpty bool) bool {
 		return false
 	}
 
-	// 获取term or entries异常，则发送MsgSnap消息，并将快照发送到指定节点
+	// 获取term or entries异常，则发送MsgSnap消息，并将快照发送到指定节点(raftLog中不存在消息，需要从快照中获取)
 	if errt != nil || erre != nil { // send snapshot if we failed to get term or entries
 		if !pr.RecentActive { // 判断当前是否活跃状态
 			r.logger.Debugf("ignore sending snapshot to %x since it is not recently active", to)
@@ -602,6 +602,9 @@ func (r *raft) bcastHeartbeatWithCtx(ctx []byte) { // 给所有从节点发送�
 	})
 }
 
+// appliedTo()移动applied的index值
+// stableTo()将unstable数据删除
+// stableSnapTo() 将unstable快照数据删除
 func (r *raft) advance(rd Ready) {
 	r.reduceUncommittedSize(rd.CommittedEntries)
 
@@ -611,7 +614,7 @@ func (r *raft) advance(rd Ready) {
 	// all of the new entries due to commit pagination by size.
 	if newApplied := rd.appliedCursor(); newApplied > 0 {
 		oldApplied := r.raftLog.applied
-		r.raftLog.appliedTo(newApplied)
+		r.raftLog.appliedTo(newApplied) //移动applied对应的index值
 
 		if r.prs.Config.AutoLeave && oldApplied <= r.pendingConfIndex && newApplied >= r.pendingConfIndex && r.state == StateLeader {
 			// If the current (and most recent, at least for this leader's term)

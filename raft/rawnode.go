@@ -176,6 +176,9 @@ func (rn *RawNode) HasReady() bool {
 
 // Advance notifies the RawNode that the application has applied and saved progress in the
 // last Ready results.
+// appliedTo()移动applied的index值
+// stableTo()将unstable数据删除
+// stableSnapTo() 将unstable快照数据删除
 func (rn *RawNode) Advance(rd Ready) {
 	if !IsEmptyHardState(rd.HardState) {
 		rn.prevHardSt = rd.HardState
