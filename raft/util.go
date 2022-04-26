@@ -210,6 +210,8 @@ func DescribeEntries(ents []pb.Entry, f EntryFormatter) string {
 	return buf.String()
 }
 
+// 获取ents的数据长度
+// 根据指定的最大size返回节点的值
 func limitSize(ents []pb.Entry, maxSize uint64) []pb.Entry {
 	if len(ents) == 0 {
 		return ents

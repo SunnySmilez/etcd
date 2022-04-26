@@ -115,6 +115,7 @@ func (ms *MemoryStorage) SetHardState(st pb.HardState) error {
 }
 
 // Entries implements the Storage interface.
+// 根据lo，hi的范围返回ents的数据。需要判断ents的数据大小必须小咸鱼maxSize
 func (ms *MemoryStorage) Entries(lo, hi, maxSize uint64) ([]pb.Entry, error) {
 	ms.Lock()
 	defer ms.Unlock()
