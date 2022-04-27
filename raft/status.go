@@ -24,9 +24,9 @@ import (
 // Status contains information about this Raft peer and its view of the system.
 // The Progress is only populated on the leader.
 type Status struct {
-	BasicStatus
-	Config   tracker.Config
-	Progress map[uint64]tracker.Progress
+	BasicStatus                             //基础状态信息
+	Config      tracker.Config              //配置信息
+	Progress    map[uint64]tracker.Progress // prs状态信息
 }
 
 // BasicStatus contains basic information about the Raft peer. It does not allocate.
@@ -41,6 +41,7 @@ type BasicStatus struct {
 	LeadTransferee uint64
 }
 
+// 获取raft中Progress的信息
 func getProgressCopy(r *raft) map[uint64]tracker.Progress {
 	m := make(map[uint64]tracker.Progress)
 	r.prs.Visit(func(id uint64, pr *tracker.Progress) {
@@ -79,6 +80,7 @@ func getStatus(r *raft) Status {
 
 // MarshalJSON translates the raft status into JSON.
 // TODO: try to simplify this by introducing ID type into raft
+// 将配置信息按照json格式存储
 func (s Status) MarshalJSON() ([]byte, error) {
 	j := fmt.Sprintf(`{"id":"%x","term":%d,"vote":"%x","commit":%d,"lead":"%x","raftState":%q,"applied":%d,"progress":{`,
 		s.ID, s.Term, s.Vote, s.Commit, s.Lead, s.RaftState, s.Applied)
@@ -98,6 +100,7 @@ func (s Status) MarshalJSON() ([]byte, error) {
 	return []byte(j), nil
 }
 
+// 将配置信息按照string返回
 func (s Status) String() string {
 	b, err := s.MarshalJSON()
 	if err != nil {
