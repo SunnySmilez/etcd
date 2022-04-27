@@ -488,7 +488,7 @@ func (r *raft) maybeSendAppend(to uint64, sendIfEmpty bool) bool {
 		return false
 	}
 
-	// 获取term or entries异常，则发送MsgSnap消息，并将快照发送到指定节点
+	// 获取term or entries异常，则发送MsgSnap消息，并将快照发送到指定节点(raftLog中不存在消息，需要从快照中获取)
 	if errt != nil || erre != nil { // send snapshot if we failed to get term or entries
 		if !pr.RecentActive { // 判断当前是否活跃状态
 			r.logger.Debugf("ignore sending snapshot to %x since it is not recently active", to)
@@ -602,6 +602,9 @@ func (r *raft) bcastHeartbeatWithCtx(ctx []byte) { // 给所有从节点发送�
 	})
 }
 
+// appliedTo()移动applied的index值
+// stableTo()将unstable数据删除
+// stableSnapTo() 将unstable快照数据删除
 func (r *raft) advance(rd Ready) {
 	r.reduceUncommittedSize(rd.CommittedEntries)
 
@@ -611,7 +614,7 @@ func (r *raft) advance(rd Ready) {
 	// all of the new entries due to commit pagination by size.
 	if newApplied := rd.appliedCursor(); newApplied > 0 {
 		oldApplied := r.raftLog.applied
-		r.raftLog.appliedTo(newApplied)
+		r.raftLog.appliedTo(newApplied) //移动applied对应的index值
 
 		if r.prs.Config.AutoLeave && oldApplied <= r.pendingConfIndex && newApplied >= r.pendingConfIndex && r.state == StateLeader {
 			// If the current (and most recent, at least for this leader's term)
@@ -692,7 +695,7 @@ func (r *raft) appendEntry(es ...pb.Entry) (accepted bool) {
 	li := r.raftLog.lastIndex() // 获取raftlog的最后的index
 	for i := range es {         //更新待追加记录 Term 值和索引值
 		es[i].Term = r.Term              //Entry 记录 Term 指定为当前Leader的任期
-		es[i].Index = li + 1 + uint64(i) //日志记录指定index todo 没看懂index的值的变化
+		es[i].Index = li + 1 + uint64(i) //日志记录指定index  没看懂index的值的变化（第n条消息编号为n+起始值）
 	}
 	// Track the size of this uncommitted proposal.
 	if !r.increaseUncommittedSize(es) { // 记录未处理的数据大小
@@ -704,8 +707,9 @@ func (r *raft) appendEntry(es ...pb.Entry) (accepted bool) {
 		return false
 	}
 	// use latest "last" index after truncate/append
+	// li为拼接后的最大索引值
 	li = r.raftLog.append(es...)         // 数据追加到raftLog，记录到r.raftLog.unstable，比对es中index的大小及raftLog的索引范围判断截取还是拼接等操作
-	r.prs.Progress[r.id].MaybeUpdate(li) // 响应flower
+	r.prs.Progress[r.id].MaybeUpdate(li) // 响应flower，更新pr的next及match值
 	// Regardless of maybeCommit's return, our caller will call bcastAppend.
 	r.maybeCommit() //尝试提交记录
 	return true
@@ -1122,7 +1126,7 @@ func stepLeader(r *raft, m pb.Message) error {
 			return ErrProposalDropped
 		}
 
-		for i := range m.Entries { // 写入数据
+		for i := range m.Entries { // 写入数据 此处是leader节点，m.Entries表示的是前端写入的数据，待同步到follower节点的数据
 			e := &m.Entries[i]
 			var cc pb.ConfChangeI
 			// 处理集群信息变更类消息

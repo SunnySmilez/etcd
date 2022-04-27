@@ -375,7 +375,7 @@ func (l *raftLog) maybeCommit(maxIndex, term uint64) bool {
 	debug.WriteLog("raft.log.maybeCommit", fmt.Sprintf("maxIndex:%+v, l:%+v", maxIndex, l), nil)
 	// 当前任期相等，且当前的index值大于committed的值，说明改数据未进行提交
 	if maxIndex > l.committed && l.zeroTermOnErrCompacted(l.term(maxIndex)) == term { // 中间节点的提交记录大于当前已提交的记录，说明过半数的节点已经完成了提交
-		l.commitTo(maxIndex)
+		l.commitTo(maxIndex) // 提交记录
 		return true
 	}
 	return false

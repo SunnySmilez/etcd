@@ -103,6 +103,7 @@ type Ready struct {
 
 	// MustSync indicates whether the HardState and Entries must be synchronously
 	// written to disk or if an asynchronous write is permissible.
+	// 表示HardState下的数据是否强制写入到磁盘
 	MustSync bool
 }
 
@@ -352,7 +353,7 @@ func (n *node) run() {
 	for {
 		if advancec != nil {
 			readyc = nil
-		} else if n.rn.HasReady() { // 此处会一直读取数据
+		} else if n.rn.HasReady() { // 判断是否存在需要执行的数据（此处会一直读取数据），readyc到数据会返回给etcdserver/raft进行处理（start会进行监控，将数据存储持久化存储中）
 			//fmt.Printf("here?n:%+v\n", n)
 			// Populate a Ready. Note that this Ready is not guaranteed to
 			// actually be handled. We will arm readyc, but there's no guarantee
@@ -445,19 +446,22 @@ func (n *node) run() {
 			}
 		case <-n.tickc:
 			n.rn.Tick()
-		case readyc <- rd: // rd数据写入数据到readyc（rd来自raft.msgs的数据）
+		case readyc <- rd: // rd数据写入数据到readyc（rd来自raft.msgs的数据）；readyc数据的写入
 			//if len(r.msgs) != 0 && rd.Messages[0].Type != pb.MsgHeartbeat && rd.Messages[0].Type != pb.MsgHeartbeatResp {
 			if len(r.msgs) != 0 && rd.Messages[0].Type == pb.MsgProp {
 				fmt.Printf("role:node, write data to readyc\n")
 			}
-			n.rn.acceptReady(rd)  // 将数据删除
+			n.rn.acceptReady(rd)  // 数据都已写入readyC将数据删除
 			advancec = n.advancec // advances写入数据
-		case <-advancec: // todo 此处会做什么？
+		case <-advancec: // 到这里相当于数据已经处理完成了
 			//if len(r.msgs) != 0 && rd.Messages[0].Type != pb.MsgHeartbeat && rd.Messages[0].Type != pb.MsgHeartbeatResp {
 			if len(r.msgs) != 0 && rd.Messages[0].Type == pb.MsgProp {
 				fmt.Printf("advancec here\n")
 			}
 
+			// appliedTo()移动applied的index值
+			// stableTo()将unstable数据删除
+			// stableSnapTo() 将unstable快照数据删除
 			n.rn.Advance(rd)
 			rd = Ready{}
 			advancec = nil
@@ -481,6 +485,7 @@ func (n *node) Tick() {
 	}
 }
 
+// 进行选举操作
 func (n *node) Campaign(ctx context.Context) error { return n.step(ctx, pb.Message{Type: pb.MsgHup}) }
 
 // 将raftnode.propc数据写入到raftnode.node.propc
@@ -498,7 +503,7 @@ func (n *node) Propose(ctx context.Context, data []byte) error {
 
 func (n *node) Step(ctx context.Context, m pb.Message) error {
 	// ignore unexpected local messages receiving over network
-	if IsLocalMsg(m.Type) {
+	if IsLocalMsg(m.Type) { // 本地消息不做处理
 		// TODO: return an error?
 		return nil
 	}
@@ -507,6 +512,7 @@ func (n *node) Step(ctx context.Context, m pb.Message) error {
 
 // 配置变更消息组装（Message.Type还是MsgProp类型，entry.Type是EntryConfChange）
 func confChangeToMsg(c pb.ConfChangeI) (pb.Message, error) {
+	// 获取配置变更的类型及数据（支持v2/v3两种数据配置方式）
 	typ, data, err := pb.MarshalConfChange(c)
 	if err != nil {
 		return pb.Message{}, err
@@ -514,6 +520,7 @@ func confChangeToMsg(c pb.ConfChangeI) (pb.Message, error) {
 	return pb.Message{Type: pb.MsgProp, Entries: []pb.Entry{{Type: typ, Data: data}}}, nil
 }
 
+// 处理配置消息
 func (n *node) ProposeConfChange(ctx context.Context, cc pb.ConfChangeI) error {
 	msg, err := confChangeToMsg(cc)
 	if err != nil {
@@ -542,7 +549,7 @@ func (n *node) stepWithWaitOption(ctx context.Context, m pb.Message, wait bool) 
 		//todo 此处会循环执行，是有心跳？
 		//fmt.Printf("m.Type != pb.MsgProp\n")
 		select {
-		case n.recvc <- m: // 数据写入到recvc
+		case n.recvc <- m: // 非MsgProp类型数据写入到recvc
 			debug.WriteLog("raft.node.stepWithWaitOption", "write to node.recvc", []pb.Message{m})
 			return nil
 		case <-ctx.Done():
@@ -552,12 +559,13 @@ func (n *node) stepWithWaitOption(ctx context.Context, m pb.Message, wait bool) 
 		}
 	}
 	ch := n.propc
+	// 消息及对应的处理结果
 	pm := msgWithResult{m: m}
 	if wait {
 		pm.result = make(chan error, 1)
 	}
 	select {
-	case ch <- pm: // 将数据写入n.propc
+	case ch <- pm: // MsgProp类型数据写入n.propc
 		//fmt.Printf("process:%s, time:%+v, function:%+s, msg:%+v\n", "write msg", time.Now().Unix(), "raft.node.stepWithWaitOption", "write to node.propc")
 		debug.WriteLog("raft.node.stepWithWaitOption", "write to node.propc", []pb.Message{m})
 		//fmt.Printf("role:node,send data to n.proc by wait, node.propc: %+v\n", pm)
@@ -582,8 +590,10 @@ func (n *node) stepWithWaitOption(ctx context.Context, m pb.Message, wait bool) 
 	return nil
 }
 
+// 返回n.readyc数据
 func (n *node) Ready() <-chan Ready { return n.readyc }
 
+// 向n.advancec写入数据
 func (n *node) Advance() {
 	select {
 	case n.advancec <- struct{}{}:
@@ -604,6 +614,7 @@ func (n *node) ApplyConfChange(cc pb.ConfChangeI) *pb.ConfState {
 	return &cs
 }
 
+// 初始化一个status对象
 func (n *node) Status() Status {
 	c := make(chan Status)
 	select {
@@ -614,6 +625,7 @@ func (n *node) Status() Status {
 	}
 }
 
+// 向n.recvc中发送接收不可达消息
 func (n *node) ReportUnreachable(id uint64) {
 	fmt.Printf("perr send call here id:%+v\n", id)
 	select {
@@ -622,6 +634,7 @@ func (n *node) ReportUnreachable(id uint64) {
 	}
 }
 
+// 向n.recvc发送快照成功失败消息
 func (n *node) ReportSnapshot(id uint64, status SnapshotStatus) {
 	rej := status == SnapshotFailure
 
@@ -631,6 +644,7 @@ func (n *node) ReportSnapshot(id uint64, status SnapshotStatus) {
 	}
 }
 
+// 向n.recvc发送leader选举消息
 func (n *node) TransferLeadership(ctx context.Context, lead, transferee uint64) {
 	select {
 	// manually set 'from' and 'to', so that leader can voluntarily transfers its leadership
@@ -640,16 +654,17 @@ func (n *node) TransferLeadership(ctx context.Context, lead, transferee uint64) 
 	}
 }
 
+// todo 不知道用途
 func (n *node) ReadIndex(ctx context.Context, rctx []byte) error {
 	return n.step(ctx, pb.Message{Type: pb.MsgReadIndex, Entries: []pb.Entry{{Data: rctx}}})
 }
 
 // 此处节点会将数据写入到ready中（curl写入的节点）
-func newReady(r *raft, prevSoftSt *SoftState, prevHardSt pb.HardState) Ready {
+func newReady(r *raft, prevSoftSt *SoftState, prevHardSt pb.HardState) Ready { // 将消息写入到ready中
 	rd := Ready{
-		Entries:          r.raftLog.unstableEntries(),
+		Entries:          r.raftLog.unstableEntries(), // unsatble中的数据
 		CommittedEntries: r.raftLog.nextEnts(),
-		Messages:         r.msgs,
+		Messages:         r.msgs, // raft.msgs
 	}
 
 	// 查看MsgProp日志，不是项目代码
@@ -658,13 +673,13 @@ func newReady(r *raft, prevSoftSt *SoftState, prevHardSt pb.HardState) Ready {
 		fmt.Printf("rd:%+v\n", rd)
 	}
 
-	if softSt := r.softState(); !softSt.equal(prevSoftSt) {
+	if softSt := r.softState(); !softSt.equal(prevSoftSt) { // 不相等才进行赋值
 		rd.SoftState = softSt
 	}
-	if hardSt := r.hardState(); !isHardStateEqual(hardSt, prevHardSt) {
+	if hardSt := r.hardState(); !isHardStateEqual(hardSt, prevHardSt) { // 不相等才进行赋值
 		rd.HardState = hardSt
 	}
-	if r.raftLog.unstable.snapshot != nil {
+	if r.raftLog.unstable.snapshot != nil { //存在unstable的快照数据
 		rd.Snapshot = *r.raftLog.unstable.snapshot
 	}
 	if len(r.readStates) != 0 {
@@ -682,5 +697,6 @@ func MustSync(st, prevst pb.HardState, entsnum int) bool {
 	// currentTerm
 	// votedFor
 	// log entries[]
+	// 存在数据并且进行了重新选举（任期发送了变化）
 	return entsnum != 0 || st.Vote != prevst.Vote || st.Term != prevst.Term
 }
