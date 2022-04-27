@@ -23,10 +23,12 @@ import (
 
 // ErrCompacted is returned by Storage.Entries/Compact when a requested
 // index is unavailable because it predates the last snapshot.
+// 传入的index比ents的最小值还要小，左侧越界了
 var ErrCompacted = errors.New("requested index is unavailable due to compaction")
 
 // ErrSnapOutOfDate is returned by Storage.CreateSnapshot when a requested
 // index is older than the existing snapshot.
+// ms.snap对应的最后一条的index大于传入的snap的最后一条的index值
 var ErrSnapOutOfDate = errors.New("requested index is older than the existing snapshot")
 
 // ErrUnavailable is returned by Storage interface when the requested log entries
@@ -81,6 +83,7 @@ type Storage interface {
 
 // MemoryStorage implements the Storage interface backed by an
 // in-memory array.
+// 内存的持久化方式
 type MemoryStorage struct {
 	// Protects access to all fields. Most methods of MemoryStorage are
 	// run on the raft goroutine, but Append() is run on an application
@@ -94,6 +97,7 @@ type MemoryStorage struct {
 }
 
 // NewMemoryStorage creates an empty MemoryStorage.
+// 初始化内存持久化存储
 func NewMemoryStorage() *MemoryStorage {
 	return &MemoryStorage{
 		// When starting from scratch populate the list with a dummy entry at term zero.
@@ -102,11 +106,13 @@ func NewMemoryStorage() *MemoryStorage {
 }
 
 // InitialState implements the Storage interface.
+// 初始化memoryStorage的HardState，confState
 func (ms *MemoryStorage) InitialState() (pb.HardState, pb.ConfState, error) {
 	return ms.hardState, ms.snapshot.Metadata.ConfState, nil
 }
 
 // SetHardState saves the current HardState.
+// 设置HardState
 func (ms *MemoryStorage) SetHardState(st pb.HardState) error {
 	ms.Lock()
 	defer ms.Unlock()
@@ -115,27 +121,28 @@ func (ms *MemoryStorage) SetHardState(st pb.HardState) error {
 }
 
 // Entries implements the Storage interface.
-// 根据lo，hi的范围返回ents的数据。需要判断ents的数据大小必须小咸鱼maxSize
+// 根据lo，hi的范围返回ents的数据。需要判断ents的数据大小必须小于maxSize
 func (ms *MemoryStorage) Entries(lo, hi, maxSize uint64) ([]pb.Entry, error) {
 	ms.Lock()
 	defer ms.Unlock()
-	offset := ms.ents[0].Index
-	if lo <= offset {
+	offset := ms.ents[0].Index // ms对应ents的第一条数据
+	if lo <= offset {          // 最小值小于第一条数据
 		return nil, ErrCompacted
 	}
-	if hi > ms.lastIndex()+1 {
+	if hi > ms.lastIndex()+1 { // 最大值比最后一条数据还要大
 		getLogger().Panicf("entries' hi(%d) is out of bound lastindex(%d)", hi, ms.lastIndex())
 	}
 	// only contains dummy entries.
-	if len(ms.ents) == 1 {
+	if len(ms.ents) == 1 { // ents仅存在一条数据
 		return nil, ErrUnavailable
 	}
 
-	ents := ms.ents[lo-offset : hi-offset]
-	return limitSize(ents, maxSize), nil
+	ents := ms.ents[lo-offset : hi-offset] // 根据lo,hi返回ents范围内的数据
+	return limitSize(ents, maxSize), nil   // 判断范围内的数据必须小于maxSize
 }
 
 // Term implements the Storage interface.
+// 返回给定索引的term值（判断越界）
 func (ms *MemoryStorage) Term(i uint64) (uint64, error) {
 	ms.Lock()
 	defer ms.Unlock()
@@ -150,17 +157,20 @@ func (ms *MemoryStorage) Term(i uint64) (uint64, error) {
 }
 
 // LastIndex implements the Storage interface.
+// 返回ms中的最后一条数据的index
 func (ms *MemoryStorage) LastIndex() (uint64, error) {
 	ms.Lock()
 	defer ms.Unlock()
 	return ms.lastIndex(), nil
 }
 
+// 返回最后一条数据的索引值
 func (ms *MemoryStorage) lastIndex() uint64 {
 	return ms.ents[0].Index + uint64(len(ms.ents)) - 1
 }
 
 // FirstIndex implements the Storage interface.
+// 返回ents第一条数据的索引值
 func (ms *MemoryStorage) FirstIndex() (uint64, error) {
 	ms.Lock()
 	defer ms.Unlock()
@@ -172,6 +182,7 @@ func (ms *MemoryStorage) firstIndex() uint64 {
 }
 
 // Snapshot implements the Storage interface.
+// 返回ms的snapshot数据
 func (ms *MemoryStorage) Snapshot() (pb.Snapshot, error) {
 	ms.Lock()
 	defer ms.Unlock()
@@ -180,20 +191,21 @@ func (ms *MemoryStorage) Snapshot() (pb.Snapshot, error) {
 
 // ApplySnapshot overwrites the contents of this Storage object with
 // those of the given snapshot.
-// 更新快照数据
+// 根据传入的快照数据更新ms中快照数据（传入的快照数据的最后一条的index必须比ms中的最后一条index要大）
 func (ms *MemoryStorage) ApplySnapshot(snap pb.Snapshot) error {
 	ms.Lock()
 	defer ms.Unlock()
 
 	//handle check for old snapshot being applied
-	msIndex := ms.snapshot.Metadata.Index
-	snapIndex := snap.Metadata.Index
-	if msIndex >= snapIndex {
+	msIndex := ms.snapshot.Metadata.Index // ms快照中的最后一条数据的索引值
+	snapIndex := snap.Metadata.Index      // 传入快照数据的最后一条数据的索引值
+	if msIndex >= snapIndex {             // 当ms中快照中的最后一条数据大于给定快照的值时
 		return ErrSnapOutOfDate
 	}
 
+	// ms.snapshot 赋值
 	ms.snapshot = snap
-	ms.ents = []pb.Entry{{Term: snap.Metadata.Term, Index: snap.Metadata.Index}}
+	ms.ents = []pb.Entry{{Term: snap.Metadata.Term, Index: snap.Metadata.Index}} // ents 第一条数据为快照的最后一条数据
 	return nil
 }
 
@@ -201,21 +213,24 @@ func (ms *MemoryStorage) ApplySnapshot(snap pb.Snapshot) error {
 // can be used to reconstruct the state at that point.
 // If any configuration changes have been made since the last compaction,
 // the result of the last ApplyConfChange must be passed in.
+// i值必须在(ms.snap.meradata.index,ms.lastIndex]
+// 根据给定的i值（i为给定的数据的最后一条数据的index值），data以及confState进行快照操作
 func (ms *MemoryStorage) CreateSnapshot(i uint64, cs *pb.ConfState, data []byte) (pb.Snapshot, error) {
 	ms.Lock()
 	defer ms.Unlock()
-	if i <= ms.snapshot.Metadata.Index {
+	if i <= ms.snapshot.Metadata.Index { // 传入的i值比ms中快照数据中最后一条的index还要小
 		return pb.Snapshot{}, ErrSnapOutOfDate
 	}
 
-	offset := ms.ents[0].Index
-	if i > ms.lastIndex() {
+	offset := ms.ents[0].Index // ms.ents的第一条数据的索引值
+	if i > ms.lastIndex() {    // i比ents最后一条的索引还要大
 		getLogger().Panicf("snapshot %d is out of bound lastindex(%d)", i, ms.lastIndex())
 	}
 
+	// 将数据存入快照中
 	ms.snapshot.Metadata.Index = i
 	ms.snapshot.Metadata.Term = ms.ents[i-offset].Term
-	if cs != nil {
+	if cs != nil { // 快照时对应的confState数据
 		ms.snapshot.Metadata.ConfState = *cs
 	}
 	ms.snapshot.Data = data
@@ -225,18 +240,19 @@ func (ms *MemoryStorage) CreateSnapshot(i uint64, cs *pb.ConfState, data []byte)
 // Compact discards all log entries prior to compactIndex.
 // It is the application's responsibility to not attempt to compact an index
 // greater than raftLog.applied.
+// 对ms.ents 进行裁剪操作，删除compactIndex之前的ents
 func (ms *MemoryStorage) Compact(compactIndex uint64) error {
 	ms.Lock()
 	defer ms.Unlock()
-	offset := ms.ents[0].Index
-	if compactIndex <= offset {
+	offset := ms.ents[0].Index  // ents第一条数据的索引值
+	if compactIndex <= offset { // 左侧越界
 		return ErrCompacted
 	}
-	if compactIndex > ms.lastIndex() {
+	if compactIndex > ms.lastIndex() { //右侧越界
 		getLogger().Panicf("compact %d is out of bound lastindex(%d)", compactIndex, ms.lastIndex())
 	}
 
-	i := compactIndex - offset
+	i := compactIndex - offset // 数据的其实位置
 	ents := make([]pb.Entry, 1, 1+uint64(len(ms.ents))-i)
 	ents[0].Index = ms.ents[i].Index
 	ents[0].Term = ms.ents[i].Term
@@ -256,24 +272,25 @@ func (ms *MemoryStorage) Append(entries []pb.Entry) error {
 	ms.Lock()
 	defer ms.Unlock()
 
-	first := ms.firstIndex()
-	last := entries[0].Index + uint64(len(entries)) - 1
+	first := ms.firstIndex()                            // ms的第一条数据的index值
+	last := entries[0].Index + uint64(len(entries)) - 1 // 计算传入数据的最后一条数据的index值
 
 	// shortcut if there is no new entry.
-	if last < first {
+	if last < first { // 最后一条数据比ms的第一条数据还小，说明数据比较老了
 		return nil
 	}
 	// truncate compacted entries
-	if first > entries[0].Index {
+	if first > entries[0].Index { // 传入的ents的左侧包含了部分ms.ents的数据，需要进行裁剪
 		entries = entries[first-entries[0].Index:]
 	}
 
-	offset := entries[0].Index - ms.ents[0].Index
+	offset := entries[0].Index - ms.ents[0].Index // 计算ents中间间隔多少条数据
 	switch {
 	case uint64(len(ms.ents)) > offset: //／保留 MemoryStorage.ents中的first-offset 的部分， offset之后的部分被抛弃
-		ms.ents = append([]pb.Entry{}, ms.ents[:offset]...)
-		ms.ents = append(ms.ents, entries...)
-	case uint64(len(ms.ents)) == offset: //／直接将待追加的日志记录（ entries ）追加到 MemoryStorage
+		// ms.ents有部分数据存在ents中，需要进行切割操作
+		ms.ents = append([]pb.Entry{}, ms.ents[:offset]...) // 切割到offset位置，也就是两者交界的位置
+		ms.ents = append(ms.ents, entries...)               // 将ents数据拼接进去
+	case uint64(len(ms.ents)) == offset: //正好相接；直接将待追加的日志记录（ entries ）追加到 MemoryStorage
 		ms.ents = append(ms.ents, entries...)
 	default:
 		getLogger().Panicf("missing log entry [last: %d, append at: %d]",
