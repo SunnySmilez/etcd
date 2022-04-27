@@ -32,6 +32,7 @@ type unstable struct {
 
 // maybeFirstIndex returns the index of the first possible entry in entries
 // if it has a snapshot.
+// unstable对应entries第一条数据的索引，也就是snapshot最后一条数据的index+1
 func (u *unstable) maybeFirstIndex() (uint64, bool) {
 	if u.snapshot != nil {
 		return u.snapshot.Metadata.Index + 1, true
@@ -47,7 +48,7 @@ func (u *unstable) maybeLastIndex() (uint64, bool) {
 	if l := len(u.entries); l != 0 {
 		return u.offset + uint64(l) - 1, true //返回 entries 中最后一条 Entry 记录的索引值
 	}
-	if u.snapshot != nil { //如果存在快照数据 ，则 通过其元数据返回索引位
+	if u.snapshot != nil { //如果存在快照数据 ，则通过其元数据返回索引位
 		return u.snapshot.Metadata.Index, true
 	}
 	return 0, false // entries snapshot 都是空的，则整个unstable其实也就没有任何数据了
@@ -55,8 +56,9 @@ func (u *unstable) maybeLastIndex() (uint64, bool) {
 
 // maybeTerm returns the term of the entry at index i, if there
 // is any.
+// 获取对应的i的term值
 func (u *unstable) maybeTerm(i uint64) (uint64, bool) {
-	if i < u.offset {
+	if i < u.offset { // i小于unstable的ents的第一条数据的索引，那么他存在snapshot中；对于snapshot中的数据，只有最后一条数据有存储，之前的数据不会再返回
 		if u.snapshot != nil && u.snapshot.Metadata.Index == i {
 			return u.snapshot.Metadata.Term, true
 		}
@@ -67,13 +69,15 @@ func (u *unstable) maybeTerm(i uint64) (uint64, bool) {
 	if !ok {
 		return 0, false
 	}
-	if i > last {
+	if i > last { // i大于最后一条ents的索引值，则超过了界限
 		return 0, false
 	}
 
-	return u.entries[i-u.offset].Term, true
+	return u.entries[i-u.offset].Term, true // 从ents中获取对应的数据返回其term
 }
 
+// 将ents中的数据删除（数据已经存储）
+// 需要判断其term值是否相等
 func (u *unstable) stableTo(i, t uint64) {
 	// 返回数据的term值
 	gt, ok := u.maybeTerm(i)
@@ -106,19 +110,21 @@ func (u *unstable) shrinkEntriesArray() {
 	const lenMultiple = 2
 	if len(u.entries) == 0 {
 		u.entries = nil
-	} else if len(u.entries)*lenMultiple < cap(u.entries) {
+	} else if len(u.entries)*lenMultiple < cap(u.entries) { // 当前的ents的数据存储不到ents容量的一半，将数据copy到一个新的slice中
 		newEntries := make([]pb.Entry, len(u.entries))
 		copy(newEntries, u.entries)
 		u.entries = newEntries
 	}
 }
 
+// snapshot数据进行删除（已经存入了持久化存储）
 func (u *unstable) stableSnapTo(i uint64) {
 	if u.snapshot != nil && u.snapshot.Metadata.Index == i {
 		u.snapshot = nil
 	}
 }
 
+// 从snapshot恢复数据，ents对应的第一条数据的索引为snapShot的最后一条的index+1
 func (u *unstable) restore(s pb.Snapshot) {
 	u.offset = s.Metadata.Index + 1
 	u.entries = nil
@@ -153,7 +159,7 @@ func (u *unstable) truncateAndAppend(ents []pb.Entry) {
 
 // 数据进行切割
 func (u *unstable) slice(lo uint64, hi uint64) []pb.Entry {
-	u.mustCheckOutOfBounds(lo, hi)
+	u.mustCheckOutOfBounds(lo, hi) //判断数据不能越界
 	return u.entries[lo-u.offset : hi-u.offset]
 }
 
