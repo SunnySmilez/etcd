@@ -53,6 +53,7 @@ func getProgressCopy(r *raft) map[uint64]tracker.Progress {
 	return m
 }
 
+//获取基础的状态信息（HardState，SoftState，Applied）
 func getBasicStatus(r *raft) BasicStatus {
 	s := BasicStatus{
 		ID:             r.id,
@@ -65,6 +66,7 @@ func getBasicStatus(r *raft) BasicStatus {
 }
 
 // getStatus gets a copy of the current raft status.
+// 返回raft的HardState，SoftState，Applied如果是leader节点返回prs数据
 func getStatus(r *raft) Status {
 	var s Status
 	s.BasicStatus = getBasicStatus(r)

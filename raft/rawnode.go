@@ -46,7 +46,7 @@ type RawNode struct { // 是一个线程不安全的node
 // state manually by setting up a Storage that has a first index > 1 and which
 // stores the desired ConfState as its InitialState.
 func NewRawNode(config *Config) (*RawNode, error) {
-	r := newRaft(config)
+	r := newRaft(config) // 实例化一个raft
 	rn := &RawNode{
 		raft: r,
 	}
@@ -56,6 +56,7 @@ func NewRawNode(config *Config) (*RawNode, error) {
 }
 
 // Tick advances the internal logical clock by a single tick.
+// raft定时器
 func (rn *RawNode) Tick() {
 	rn.raft.tick()
 }
@@ -68,12 +69,14 @@ func (rn *RawNode) Tick() {
 //
 // WARNING: Be very careful about using this method as it subverts the Raft
 // state machine. You should probably be using Tick instead.
+// 选举计时器
 func (rn *RawNode) TickQuiesced() {
 	// 选举时钟计数器
 	rn.raft.electionElapsed++
 }
 
 // Campaign causes this RawNode to transition to candidate state.
+// 选举超时时，发送的消息
 func (rn *RawNode) Campaign() error {
 	return rn.raft.Step(pb.Message{ // 发送MsgHup消息
 		Type: pb.MsgHup,
@@ -81,6 +84,7 @@ func (rn *RawNode) Campaign() error {
 }
 
 // Propose proposes data be appended to the raft log.
+// 发送一条MsgProp消息
 func (rn *RawNode) Propose(data []byte) error { // 发送普通消息
 	return rn.raft.Step(pb.Message{
 		Type: pb.MsgProp,
@@ -92,7 +96,8 @@ func (rn *RawNode) Propose(data []byte) error { // 发送普通消息
 
 // ProposeConfChange proposes a config change. See (Node).ProposeConfChange for
 // details.
-func (rn *RawNode) ProposeConfChange(cc pb.ConfChangeI) error { // 配置变更类型消息发送
+// 配置变更类型消息发送
+func (rn *RawNode) ProposeConfChange(cc pb.ConfChangeI) error {
 	m, err := confChangeToMsg(cc)
 	if err != nil {
 		return err
@@ -110,13 +115,14 @@ func (rn *RawNode) ApplyConfChange(cc pb.ConfChangeI) *pb.ConfState {
 }
 
 // Step advances the state machine using the given message.
+// 消息转发给raft.step处理
 func (rn *RawNode) Step(m pb.Message) error {
 	// ignore unexpected local messages receiving over network
 	if IsLocalMsg(m.Type) { // 忽略本地消息类型
 		return ErrStepLocalMsg
 	}
 	// 发送节点是从节点或者不是响应的消息类型（那就是主节点）
-	if pr := rn.raft.prs.Progress[m.From]; pr != nil || !IsResponseMsg(m.Type) {
+	if pr := rn.raft.prs.Progress[m.From]; pr != nil || !IsResponseMsg(m.Type) { // todo 为什么要加这个限制
 		return rn.raft.Step(m) // 发送消息给raft处理
 	}
 	return ErrStepPeerNotFound
@@ -135,6 +141,7 @@ func (rn *RawNode) Ready() Ready {
 // readyWithoutAccept returns a Ready. This is a read-only operation, i.e. there
 // is no obligation that the Ready must be handled.
 // 返回一个就绪状态
+// 调用node.ready 实际就是初始化ready
 func (rn *RawNode) readyWithoutAccept() Ready {
 	return newReady(rn.raft, rn.prevSoftSt, rn.prevHardSt)
 }
@@ -142,6 +149,7 @@ func (rn *RawNode) readyWithoutAccept() Ready {
 // acceptReady is called when the consumer of the RawNode has decided to go
 // ahead and handle a Ready. Nothing must alter the state of the RawNode between
 // this call and the prior call to Ready().
+// 记录上一个消息的softSt及readStates，将raft.msgs删除（数据已经处理完成）
 func (rn *RawNode) acceptReady(rd Ready) {
 	if rd.SoftState != nil {
 		rn.prevSoftSt = rd.SoftState
@@ -154,12 +162,13 @@ func (rn *RawNode) acceptReady(rd Ready) {
 
 // HasReady called when RawNode user need to check if any Ready pending.
 // Checking logic in this method should be consistent with Ready.containsUpdates().
+//todo 不太清楚hasReady什么意思，感觉只要有状态的变更，数据待处理就是ready状态
 func (rn *RawNode) HasReady() bool {
 	r := rn.raft
-	if !r.softState().equal(rn.prevSoftSt) { // 非软状态
+	if !r.softState().equal(rn.prevSoftSt) { // 与上一个节点不相等
 		return true
 	}
-	if hardSt := r.hardState(); !IsEmptyHardState(hardSt) && !isHardStateEqual(hardSt, rn.prevHardSt) { // 已经进入了下一轮term
+	if hardSt := r.hardState(); !IsEmptyHardState(hardSt) && !isHardStateEqual(hardSt, rn.prevHardSt) { // 与上一个HardSt不相等
 		return true
 	}
 	if r.raftLog.hasPendingSnapshot() { // 存在等待的快照
@@ -176,6 +185,7 @@ func (rn *RawNode) HasReady() bool {
 
 // Advance notifies the RawNode that the application has applied and saved progress in the
 // last Ready results.
+// 数据储存完成，删除各种存储数据，移动applied的值
 // appliedTo()移动applied的index值
 // stableTo()将unstable数据删除
 // stableSnapTo() 将unstable快照数据删除
@@ -188,6 +198,7 @@ func (rn *RawNode) Advance(rd Ready) {
 
 // Status returns the current status of the given group. This allocates, see
 // BasicStatus and WithProgress for allocation-friendlier choices.
+// 返回raft的HardState，SoftState，Applied如果是leader节点返回prs数据
 func (rn *RawNode) Status() Status {
 	status := getStatus(rn.raft)
 	return status
@@ -195,6 +206,7 @@ func (rn *RawNode) Status() Status {
 
 // BasicStatus returns a BasicStatus. Notably this does not contain the
 // Progress map; see WithProgress for an allocation-free way to inspect it.
+// 获取基础的状态信息（HardState，SoftState，Applied）
 func (rn *RawNode) BasicStatus() BasicStatus {
 	return getBasicStatus(rn.raft)
 }
@@ -211,6 +223,7 @@ const (
 
 // WithProgress is a helper to introspect the Progress for this node and its
 // peers.
+// 节点进行类型复制，如果是IsLearner则type为ProgressTypeLearner，否则为：ProgressTypePeer
 func (rn *RawNode) WithProgress(visitor func(id uint64, typ ProgressType, pr tracker.Progress)) {
 	rn.raft.prs.Visit(func(id uint64, pr *tracker.Progress) {
 		typ := ProgressTypePeer
@@ -224,11 +237,13 @@ func (rn *RawNode) WithProgress(visitor func(id uint64, typ ProgressType, pr tra
 }
 
 // ReportUnreachable reports the given node is not reachable for the last send.
-func (rn *RawNode) ReportUnreachable(id uint64) { // 记录消息没接收到
+// 发送没接收到消息的消息
+func (rn *RawNode) ReportUnreachable(id uint64) {
 	_ = rn.raft.Step(pb.Message{Type: pb.MsgUnreachable, From: id})
 }
 
 // ReportSnapshot reports the status of the sent snapshot.
+// 发送快照结果(成功/失败)消息
 func (rn *RawNode) ReportSnapshot(id uint64, status SnapshotStatus) {
 	rej := status == SnapshotFailure
 
@@ -236,6 +251,7 @@ func (rn *RawNode) ReportSnapshot(id uint64, status SnapshotStatus) {
 }
 
 // TransferLeader tries to transfer leadership to the given transferee.
+// 发送正在选举leder的信息
 func (rn *RawNode) TransferLeader(transferee uint64) {
 	_ = rn.raft.Step(pb.Message{Type: pb.MsgTransferLeader, From: transferee})
 }
@@ -244,6 +260,7 @@ func (rn *RawNode) TransferLeader(transferee uint64) {
 // Read State has a read index. Once the application advances further than the read
 // index, any linearizable read requests issued before the read request can be
 // processed safely. The read state will have the same rctx attached.
+// 发送只读消息类型消息
 func (rn *RawNode) ReadIndex(rctx []byte) {
 	_ = rn.raft.Step(pb.Message{Type: pb.MsgReadIndex, Entries: []pb.Entry{{Data: rctx}}})
 }
