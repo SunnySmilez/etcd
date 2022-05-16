@@ -25,6 +25,7 @@ import (
 )
 
 // Config reflects the configuration tracked in a ProgressTracker.
+//  此处应该是leaner节点信息的记录
 type Config struct {
 	Voters quorum.JointConfig
 	// AutoLeave is true if the configuration is joint and a transition to the
@@ -32,6 +33,8 @@ type Config struct {
 	// this is possible. If false, the configuration will be joint until the
 	// application initiates the transition manually.
 	AutoLeave bool
+
+	// 记录Learners的集合
 	// Learners is a set of IDs corresponding to the learners active in the
 	// current configuration.
 	//
@@ -78,6 +81,7 @@ type Config struct {
 	LearnersNext map[uint64]struct{}
 }
 
+// 将voter，learners，learners_next，autoLeave信息写入buf中
 func (c Config) String() string {
 	var buf strings.Builder
 	fmt.Fprintf(&buf, "voters=%s", c.Voters)
@@ -94,6 +98,7 @@ func (c Config) String() string {
 }
 
 // Clone returns a copy of the Config that shares no memory with the original.
+// 返回配置信息的副本
 func (c *Config) Clone() Config {
 	clone := func(m map[uint64]struct{}) map[uint64]struct{} {
 		if m == nil {
@@ -112,7 +117,7 @@ func (c *Config) Clone() Config {
 	}
 }
 
-// 记录了使用对配置，包含所有node的信息，并匹配对应的索引
+// 记录了使用的配置，包含所有node的信息，并匹配对应的索引
 // todo 不是太清楚用途
 // ProgressTracker tracks the currently active configuration and the information
 // known about the nodes and learners in it. In particular, it tracks the match
@@ -128,6 +133,7 @@ type ProgressTracker struct {
 }
 
 // MakeProgressTracker initializes a ProgressTracker.
+// 初始化ProgressTracker
 func MakeProgressTracker(maxInflight int) ProgressTracker {
 	p := ProgressTracker{
 		MaxInflight: maxInflight,
@@ -146,6 +152,7 @@ func MakeProgressTracker(maxInflight int) ProgressTracker {
 }
 
 // ConfState returns a ConfState representing the active configuration.
+// 返回ProgressTracker对应的ConfState信息
 func (p *ProgressTracker) ConfState() pb.ConfState {
 	return pb.ConfState{
 		Voters:         p.Voters[0].Slice(),
@@ -156,6 +163,7 @@ func (p *ProgressTracker) ConfState() pb.ConfState {
 	}
 }
 
+// 判断是否只有一个voter成员
 // IsSingleton returns true if (and only if) there is only one voting member
 // (i.e. the leader) in the current configuration.
 func (p *ProgressTracker) IsSingleton() bool {
@@ -178,6 +186,7 @@ func (l matchAckIndexer) AckedIndex(id uint64) (quorum.Index, bool) {
 
 // Committed returns the largest log index known to be committed based on what
 // the voting members of the group have acknowledged.
+// 返回提交的最大的索引值
 func (p *ProgressTracker) Committed() uint64 {
 	// 类型强制转换
 	//fmt.Printf("matchAckIndexer:%+v", matchAckIndexer(p.Progress))
@@ -222,19 +231,21 @@ func (p *ProgressTracker) Visit(f func(id uint64, pr *Progress)) {
 
 // QuorumActive returns true if the quorum is active from the view of the local
 // raft state machine. Otherwise, it returns false.
+// 过半数节点投票则成功，返回true，否则为false
 func (p *ProgressTracker) QuorumActive() bool {
 	votes := map[uint64]bool{}
 	p.Visit(func(id uint64, pr *Progress) {
 		if pr.IsLearner {
 			return
 		}
-		votes[id] = pr.RecentActive
+		votes[id] = pr.RecentActive // 返回投票的数组及其是否存活的标识
 	})
 
 	return p.Voters.VoteResult(votes) == quorum.VoteWon
 }
 
 // VoterNodes returns a sorted slice of voters.
+// 获取所有投票的节点并排序
 func (p *ProgressTracker) VoterNodes() []uint64 {
 	m := p.Voters.IDs()
 	nodes := make([]uint64, 0, len(m))
@@ -246,6 +257,7 @@ func (p *ProgressTracker) VoterNodes() []uint64 {
 }
 
 // LearnerNodes returns a sorted slice of learners.
+// 获取所有learner的节点并排序
 func (p *ProgressTracker) LearnerNodes() []uint64 {
 	if len(p.Learners) == 0 {
 		return nil
@@ -276,6 +288,7 @@ func (p *ProgressTracker) RecordVote(id uint64, v bool) {
 
 // TallyVotes returns the number of granted and rejected Votes, and whether the
 // election outcome is known.
+// 计数，记录赞同和反对的数，返回投票的结果
 func (p *ProgressTracker) TallyVotes() (granted int, rejected int, _ quorum.VoteResult) {
 	// Make sure to populate granted/rejected correctly even if the Votes slice
 	// contains members no longer part of the configuration. This doesn't really

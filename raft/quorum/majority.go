@@ -177,6 +177,7 @@ func (c MajorityConfig) CommittedIndex(l AckedIndexer) Index {
 // a result indicating whether the vote is pending (i.e. neither a quorum of
 // yes/no has been reached), won (a quorum of yes has been reached), or lost (a
 // quorum of no has been reached).
+// 根据投票数，判断是否过半选举
 func (c MajorityConfig) VoteResult(votes map[uint64]bool) VoteResult {
 	if len(c) == 0 {
 		// By convention, the elections on an empty config win. This comes in
@@ -191,17 +192,17 @@ func (c MajorityConfig) VoteResult(votes map[uint64]bool) VoteResult {
 	for id := range c {
 		v, ok := votes[id]
 		if !ok {
-			missing++
+			missing++ // 未投票数
 			continue
 		}
 		if v {
-			ny[1]++
+			ny[1]++ // 投成功票数
 		} else {
-			ny[0]++
+			ny[0]++ //投失败票数
 		}
 	}
 
-	q := len(c)/2 + 1
+	q := len(c)/2 + 1 //过半数
 	if ny[1] >= q {
 		return VoteWon
 	}
