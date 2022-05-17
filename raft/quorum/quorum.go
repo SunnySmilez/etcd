@@ -22,6 +22,7 @@ import (
 // Index is a Raft log position.
 type Index uint64
 
+// int转换为string，为uint64则返回无穷大
 func (i Index) String() string {
 	if i == math.MaxUint64 {
 		return "∞"
@@ -29,6 +30,7 @@ func (i Index) String() string {
 	return strconv.FormatUint(uint64(i), 10)
 }
 
+// 根据给入的投票者id，返回提交的索引值
 // AckedIndexer allows looking up a commit index for a given ID of a voter
 // from a corresponding MajorityConfig.
 type AckedIndexer interface {
@@ -37,12 +39,14 @@ type AckedIndexer interface {
 
 type mapAckIndexer map[uint64]Index
 
+//  根据给入的投票者id，返回提交的索引值
 func (m mapAckIndexer) AckedIndex(id uint64) (Index, bool) {
 	idx, ok := m[id]
 	return idx, ok
 }
 
 // VoteResult indicates the outcome of a vote.
+// 使用generate+stringer包生成vote_result_string.go的文件
 //
 //go:generate stringer -type=VoteResult
 type VoteResult uint8

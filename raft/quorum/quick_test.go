@@ -15,9 +15,12 @@
 package quorum
 
 import (
+	"fmt"
 	"math"
 	"math/rand"
 	"reflect"
+	"sort"
+	"strings"
 	"testing"
 	"testing/quick"
 )
@@ -119,4 +122,122 @@ func alternativeMajorityCommittedIndex(c MajorityConfig, l AckedIndexer) Index {
 	}
 
 	return maxQuorumIdx
+}
+
+func TestIndex_String(t *testing.T) {
+	var x [1]struct{}
+	_ = x[VotePending-1]
+	_ = x[VoteLost-2]
+	_ = x[VoteWon-3]
+}
+
+func TestStringer(t *testing.T) {
+	print(VotePending)
+	print(VotePending.String())
+}
+
+func TestMajorityConfigString(t *testing.T) {
+	c := map[uint64]struct{}{
+		1: struct{}{},
+		2: struct{}{},
+	}
+
+	sl := make([]uint64, 0, len(c))
+	for id := range c {
+		sl = append(sl, id)
+	}
+	sort.Slice(sl, func(i, j int) bool { return sl[i] < sl[j] })
+	var buf strings.Builder
+	buf.WriteByte('(')
+	for i := range sl {
+		if i > 0 {
+			buf.WriteByte(' ')
+		}
+		fmt.Fprint(&buf, sl[i])
+	}
+	buf.WriteByte(')')
+	print(buf.String())
+}
+
+func TestMajorityConfig_Describe(t *testing.T) {
+	c := map[uint64]struct{}{
+		1: struct{}{},
+		2: struct{}{},
+		3: struct{}{},
+		5: struct{}{},
+	}
+
+	type tup struct {
+		id  uint64
+		idx int
+		ok  bool // idx found?
+		bar int  // length of bar displayed for this tup
+	}
+
+	// Below, populate .bar so that the i-th largest commit index has bar i (we
+	// plot this as sort of a progress bar). The actual code is a bit more
+	// complicated and also makes sure that equal index => equal bar.
+
+	n := len(c)
+	info := make([]tup, 0, n)
+	for id := range c {
+		idx, ok := hockAckedIndex(id) // 获取提交的索引值
+		info = append(info, tup{id: id, idx: idx, ok: ok})
+	}
+
+	// Sort by index
+	// 根据提交的索引值排序
+	sort.Slice(info, func(i, j int) bool {
+		if info[i].idx == info[j].idx {
+			return info[i].id < info[j].id
+		}
+		return info[i].idx < info[j].idx
+	})
+
+	fmt.Printf("Sort by index:%+v", info)
+	// Populate .bar.
+	for i := range info {
+		if i > 0 && info[i-1].idx < info[i].idx {
+			info[i].bar = i
+		}
+	}
+
+	fmt.Printf("Populate .bar %+v", info)
+
+	// Sort by ID.
+	// 根据节点的id值排序
+	sort.Slice(info, func(i, j int) bool {
+		return info[i].id < info[j].id
+	})
+
+	fmt.Printf("Sort by ID. %+v", info)
+	var buf strings.Builder
+
+	// Print.
+	fmt.Fprint(&buf, strings.Repeat(" ", n)+"    idx\n")
+	for i := range info {
+		bar := info[i].bar
+		if !info[i].ok {
+			fmt.Fprint(&buf, "?"+strings.Repeat(" ", n))
+		} else {
+			fmt.Fprint(&buf, strings.Repeat("x", bar)+">"+strings.Repeat(" ", n-bar))
+		}
+		fmt.Fprintf(&buf, " %5d    (id=%d)\n", info[i].idx, info[i].id)
+	}
+
+	print(buf.String())
+}
+
+//AckedIndex(voterID uint64) (idx Index, found bool)
+func hockAckedIndex(voterID uint64) (idx int, found bool) {
+	hockIdx := map[uint64]int{
+		1: 2,
+		2: 1,
+		3: 3,
+		5: 10,
+	}
+
+	idx, found = hockIdx[voterID]
+
+	return
 }

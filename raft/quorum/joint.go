@@ -23,6 +23,7 @@ import (
 // majority configurations. Decisions require the support of both majorities.
 type JointConfig [2]MajorityConfig
 
+//  生成(1 2) && (3 4)的形式
 func (c JointConfig) String() string {
 	if len(c[1]) > 0 {
 		return c[0].String() + "&&" + c[1].String()
@@ -32,6 +33,7 @@ func (c JointConfig) String() string {
 
 // IDs returns a newly initialized map representing the set of voters present
 // in the joint configuration.
+// 获取两个配置中的id
 func (c JointConfig) IDs() map[uint64]struct{} {
 	m := map[uint64]struct{}{}
 	for _, cc := range c {
@@ -44,6 +46,7 @@ func (c JointConfig) IDs() map[uint64]struct{} {
 
 // Describe returns a (multi-line) representation of the commit indexes for the
 // given lookuper.
+// 多行描述格式
 func (c JointConfig) Describe(l AckedIndexer) string {
 	return MajorityConfig(c.IDs()).Describe(l)
 }
@@ -51,8 +54,9 @@ func (c JointConfig) Describe(l AckedIndexer) string {
 // CommittedIndex returns the largest committed index for the given joint
 // quorum. An index is jointly committed if it is committed in both constituent
 // majorities.
+// 返回提交的索引值
 func (c JointConfig) CommittedIndex(l AckedIndexer) Index {
-	//todo 没看懂
+	//todo 没看懂 说是两个配置，一个做后续的备用？
 	idx0 := c[0].CommittedIndex(l)
 	idx1 := c[1].CommittedIndex(l)
 	debug.WriteLog("raft.quorum.joint", fmt.Sprintf("c:%+v, l:%+v", c, l), nil)
