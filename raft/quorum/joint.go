@@ -60,7 +60,7 @@ func (c JointConfig) CommittedIndex(l AckedIndexer) Index {
 	idx0 := c[0].CommittedIndex(l)
 	idx1 := c[1].CommittedIndex(l)
 	debug.WriteLog("raft.quorum.joint", fmt.Sprintf("c:%+v, l:%+v", c, l), nil)
-	if idx0 < idx1 {
+	if idx0 < idx1 { // 返回的是最小的索引
 		return idx0
 	}
 	return idx1
@@ -78,6 +78,7 @@ func (c JointConfig) VoteResult(votes map[uint64]bool) VoteResult {
 		// If they agree, return the agreed state.
 		return r1
 	}
+	// 0个节点的时候返回的是win，所以任意一个节点返回lost就为lost
 	if r1 == VoteLost || r2 == VoteLost {
 		// If either config has lost, loss is the only possible outcome.
 		return VoteLost

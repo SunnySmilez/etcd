@@ -143,7 +143,7 @@ func insertionSort(sl []uint64) {
 // 返回提交的索引值
 func (c MajorityConfig) CommittedIndex(l AckedIndexer) Index {
 	n := len(c)
-	if n == 0 {
+	if n == 0 { //没有配置需要返回最大值，因为返回0的话，joint中获取索引的时候获取的是最小的，会一致返回0
 		// This plays well with joint quorums which, when one half is the zero
 		// MajorityConfig, should behave like the other half.
 		return math.MaxUint64
@@ -198,7 +198,7 @@ func (c MajorityConfig) CommittedIndex(l AckedIndexer) Index {
 // 根据投票数，判断是否过半选举
 // 获取投票结果
 func (c MajorityConfig) VoteResult(votes map[uint64]bool) VoteResult {
-	if len(c) == 0 {
+	if len(c) == 0 { // 外面会进行判断，两组节点只要任意一个lost则为lost
 		// By convention, the elections on an empty config win. This comes in
 		// handy with joint quorums because it'll make a half-populated joint
 		// quorum behave like a majority quorum.
