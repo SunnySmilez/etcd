@@ -62,6 +62,7 @@ type Progress struct {
 	// ProbeSent is used while this follower is in StateProbe. When ProbeSent is
 	// true, raft should pause sending replication message to this peer until
 	// ProbeSent is reset. See ProbeAcked() and IsPaused().
+	// 从节点处于探测状态的时候，该值为true，leader不再发送消息
 	ProbeSent bool
 
 	// 一个限制消息条数的队列
@@ -85,6 +86,7 @@ type Progress struct {
 
 // ResetState moves the Progress into the specified State, resetting ProbeSent,
 // PendingSnapshot, and Inflights.
+// 重置state信息
 func (pr *Progress) ResetState(state StateType) {
 	pr.ProbeSent = false
 	pr.PendingSnapshot = 0
@@ -109,17 +111,19 @@ func min(a, b uint64) uint64 {
 // ProbeAcked is called when this peer has accepted an append. It resets
 // ProbeSent to signal that additional append messages should be sent without
 // further delay.
+// 关闭探测状态
 func (pr *Progress) ProbeAcked() {
 	pr.ProbeSent = false
 }
 
 // BecomeProbe transitions into StateProbe. Next is reset to Match+1 or,
 // optionally and if larger, the index of the pending snapshot.
+// 进入探测状态
 func (pr *Progress) BecomeProbe() {
 	// If the original state is StateSnapshot, progress knows that
 	// the pending snapshot has been sent to this peer successfully, then
 	// probes from pendingSnapshot + 1.
-	if pr.State == StateSnapshot {
+	if pr.State == StateSnapshot { // 当前正在进行快照，则比对快照index还是pr的match+1更大
 		pendingSnapshot := pr.PendingSnapshot
 		pr.ResetState(StateProbe)
 		pr.Next = max(pr.Match+1, pendingSnapshot+1)
@@ -130,6 +134,7 @@ func (pr *Progress) BecomeProbe() {
 }
 
 // BecomeReplicate transitions into StateReplicate, resetting Next to Match+1.
+// 设置为同步状态
 func (pr *Progress) BecomeReplicate() {
 	pr.ResetState(StateReplicate) // 设置状态为StateReplicate
 	pr.Next = pr.Match + 1
@@ -165,7 +170,7 @@ func (pr *Progress) OptimisticUpdate(n uint64) { pr.Next = n + 1 }
 
 //maybeDecrTo ()方法的两个参数都是 MsgAppResp 消息携带的信息:
 //reject 是被拒绝 MsgApp 消息的 Index 字段，
-//last 是被拒绝 MsgAppResp 消息的 RejectHint 字段(即对应 Follower 节点 raftLog 中最后一条 II E口try记录的索引)
+//last 是被拒绝 MsgAppResp 消息的 RejectHint 字段(即对应 Follower 节点 raftLog 中最后一条entry记录的索引)
 // MaybeDecrTo adjusts the Progress to the receipt of a MsgApp rejection. The
 // arguments are the index of the append message rejected by the follower, and
 // the hint that we want to decrease to.
@@ -181,7 +186,7 @@ func (pr *Progress) MaybeDecrTo(rejected, matchHint uint64) bool {
 	if pr.State == StateReplicate { // 同步消息的状态下
 		// The rejection must be stale if the progress has matched and "rejected"
 		// is smaller than "match".
-		if rejected <= pr.Match { //出现过时的 MsgAppResp 消息 ，直接忽略
+		if rejected <= pr.Match { //出现过时的MsgAppResp消息，直接忽略
 			return false
 		}
 		// Directly decrease next to match + 1.
@@ -208,19 +213,21 @@ func (pr *Progress) MaybeDecrTo(rejected, matchHint uint64) bool {
 // operation, this is false. A throttled node will be contacted less frequently
 // until it has reached a state in which it's able to accept a steady stream of
 // log entries again.
+// 判断是否需要暂停数据同步
 func (pr *Progress) IsPaused() bool {
 	switch pr.State {
-	case StateProbe:
+	case StateProbe: // 处于探测状态，查看探测状态的值
 		return pr.ProbeSent
-	case StateReplicate: // 同步数据
+	case StateReplicate: // 处于同步数据状态，查看队列是否满了
 		return pr.Inflights.Full()
-	case StateSnapshot:
+	case StateSnapshot: // 处于快照状态，则暂停
 		return true
 	default:
 		panic("unexpected state")
 	}
 }
 
+// pr信息输出
 func (pr *Progress) String() string {
 	var buf strings.Builder
 	fmt.Fprintf(&buf, "%s match=%d next=%d", pr.State, pr.Match, pr.Next)
@@ -249,12 +256,13 @@ func (pr *Progress) String() string {
 type ProgressMap map[uint64]*Progress
 
 // String prints the ProgressMap in sorted key order, one Progress per line.
+// 输出progressMap中的id信息（进行排序）
 func (m ProgressMap) String() string {
 	ids := make([]uint64, 0, len(m))
 	for k := range m {
 		ids = append(ids, k)
 	}
-	sort.Slice(ids, func(i, j int) bool {
+	sort.Slice(ids, func(i, j int) bool { // 将id进行排序
 		return ids[i] < ids[j]
 	})
 	var buf strings.Builder

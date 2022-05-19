@@ -14,12 +14,13 @@
 
 package tracker
 
-// 一个限制MsgApp类型消息的队列
+// 一个限制MsgApp类型消息长度的队列
 // Inflights limits the number of MsgApp (represented by the largest index
 // contained within) sent to followers but not yet acknowledged by them. Callers
 // use Full() to check whether more messages can be sent, call Add() whenever
 // they are sending a new append, and release "quota" via FreeLE() whenever an
 // ack is received.
+// 记录同步的消息，Full判断是否能再次写入消息，Add添加消息，FreeLE释放空间
 type Inflights struct {
 	// the starting index in the buffer
 	//数组被当作一个环形数组使用， start 字段 中记录 buffer 中第一条 MsgApp 消息的下标
@@ -39,6 +40,7 @@ type Inflights struct {
 }
 
 // NewInflights sets up an Inflights that allows up to 'size' inflight messages.
+// 初始化一个Inflights
 func NewInflights(size int) *Inflights {
 	return &Inflights{
 		size: size,
@@ -47,7 +49,7 @@ func NewInflights(size int) *Inflights {
 
 // Clone returns an *Inflights that is identical to but shares no memory with
 // the receiver.
-func (in *Inflights) Clone() *Inflights {
+func (in *Inflights) Clone() *Inflights { // 克隆
 	ins := *in
 	ins.buffer = append([]uint64(nil), in.buffer...)
 	return &ins
@@ -62,8 +64,8 @@ func (in *Inflights) Add(inflight uint64) { // 记录待同步的消息的条数
 		panic("cannot add into a Full inflights")
 	}
 	next := in.start + in.count //获取新增消息的下标
-	size := in.size
-	if next >= size { //环形队列
+	size := in.size             // inflight的大小
+	if next >= size {           //环形队列（开始位置不是从0开始的）
 		next -= size
 	}
 	if next >= len(in.buffer) { //初始化时的buffer数组较短，随着使用会不断进行扩容(两倍）， 但其扩容的上限为size
@@ -76,6 +78,7 @@ func (in *Inflights) Add(inflight uint64) { // 记录待同步的消息的条数
 // grow the inflight buffer by doubling up to inflights.size. We grow on demand
 // instead of preallocating to inflights.size to handle systems which have
 // thousands of Raft groups per process.
+// 扩容
 func (in *Inflights) grow() {
 	newSize := len(in.buffer) * 2
 	if newSize == 0 {
@@ -124,14 +127,17 @@ func (in *Inflights) FreeLE(to uint64) {
 func (in *Inflights) FreeFirstOne() { in.FreeLE(in.buffer[in.start]) }
 
 // Full returns true if no more messages can be sent at the moment.
+// 判断是否满了
 func (in *Inflights) Full() bool {
 	return in.count == in.size
 }
 
 // Count returns the number of inflight messages.
+// 获取队列使用长度
 func (in *Inflights) Count() int { return in.count }
 
 // reset frees all inflights.
+// 重置队列
 func (in *Inflights) reset() {
 	in.count = 0
 	in.start = 0
