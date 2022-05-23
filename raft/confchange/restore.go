@@ -26,6 +26,9 @@ import (
 // b) another slice that, when applied to the config resulted from 1), represents the
 // ConfState.
 func toConfChangeSingle(cs pb.ConfState) (out []pb.ConfChangeSingle, in []pb.ConfChangeSingle) {
+	// 描述的是联合配置的含义
+	// 当前可以投票的有1，2，4，6节点，新的配置投票节点为：1，2，3；
+	// 可以发现1，2节点在下一轮中依旧可以投票，4节点会成为learner节点，6节点会被删除，3节点被添加为投票节点
 	// Example to follow along this code:
 	// voters=(1 2 3) learners=(5) outgoing=(1 2 4 6) learners_next=(4)
 	//
@@ -37,6 +40,7 @@ func toConfChangeSingle(cs pb.ConfState) (out []pb.ConfChangeSingle, in []pb.Con
 	// We can't tell whether 5 was a learner before entering the joint config,
 	// but it doesn't matter (we'll pretend that it wasn't).
 	//
+	// 代码实现的操作节点逻辑
 	// The code below will construct
 	// outgoing = add 1; add 2; add 4; add 6
 	// incoming = remove 1; remove 2; remove 4; remove 6
@@ -132,7 +136,7 @@ func Restore(chg Changer, cs pb.ConfState) (tracker.Config, tracker.ProgressMap,
 			cc := cc // loop-local copy
 			// 传入一个处理函数
 			ops = append(ops, func(chg Changer) (tracker.Config, tracker.ProgressMap, error) {
-				return chg.Simple(cc)
+				return chg.Simple(cc) // 应用配置信息
 			})
 		}
 	} else {
@@ -154,7 +158,7 @@ func Restore(chg Changer, cs pb.ConfState) (tracker.Config, tracker.ProgressMap,
 		// would be removing 2,3,4 and then adding in 1,2,3 while transitioning
 		// into a joint state.
 		ops = append(ops, func(chg Changer) (tracker.Config, tracker.ProgressMap, error) {
-			return chg.EnterJoint(cs.AutoLeave, incoming...)
+			return chg.EnterJoint(cs.AutoLeave, incoming...) // incoming的配置写入到outcoming中，再调用apply
 		})
 	}
 

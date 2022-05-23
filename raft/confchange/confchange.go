@@ -47,24 +47,25 @@ type Changer struct {
 //
 // [1]: https://github.com/ongardie/dissertation/blob/master/online-trim.pdf
 func (c Changer) EnterJoint(autoLeave bool, ccs ...pb.ConfChangeSingle) (tracker.Config, tracker.ProgressMap, error) {
-	cfg, prs, err := c.checkAndCopy()
+	cfg, prs, err := c.checkAndCopy() // 检验并复制
 	if err != nil {
 		return c.err(err)
 	}
-	if joint(cfg) {
+	if joint(cfg) { //voters[1]不为空则报错
 		err := errors.New("config is already joint")
 		return c.err(err)
 	}
-	if len(incoming(cfg.Voters)) == 0 {
+	if len(incoming(cfg.Voters)) == 0 { // voters[0]为空也报错
 		// We allow adding nodes to an empty config for convenience (testing and
 		// bootstrap), but you can't enter a joint state.
 		err := errors.New("can't make a zero-voter config joint")
 		return c.err(err)
 	}
 	// Clear the outgoing config.
+	// voters[1]赋值空
 	*outgoingPtr(&cfg.Voters) = quorum.MajorityConfig{}
 	// Copy incoming to outgoing.
-	for id := range incoming(cfg.Voters) {
+	for id := range incoming(cfg.Voters) { // voters[0]复制到voters[1]
 		outgoing(cfg.Voters)[id] = struct{}{}
 	}
 
@@ -72,9 +73,11 @@ func (c Changer) EnterJoint(autoLeave bool, ccs ...pb.ConfChangeSingle) (tracker
 		return c.err(err)
 	}
 	cfg.AutoLeave = autoLeave
+	// 检验并返回
 	return checkAndReturn(cfg, prs)
 }
 
+// 将cfg.voters[1]（new,old）数据写入到cfg.voters[0]（new）,同时将learnerNext写入learner
 // LeaveJoint transitions out of a joint configuration. It is an error to call
 // this method if the configuration is not joint, i.e. if the outgoing majority
 // config Voters[1] is empty.
@@ -94,15 +97,17 @@ func (c Changer) LeaveJoint() (tracker.Config, tracker.ProgressMap, error) {
 	if err != nil {
 		return c.err(err)
 	}
+	//voters[1]为空则报错
 	if !joint(cfg) {
 		err := errors.New("can't leave a non-joint config")
 		return c.err(err)
 	}
+	// 这跟上面的判断有啥区别？
 	if len(outgoing(cfg.Voters)) == 0 {
 		err := fmt.Errorf("configuration is not joint: %v", cfg)
 		return c.err(err)
 	}
-	for id := range cfg.LearnersNext {
+	for id := range cfg.LearnersNext { // 将learnerNext数据写入learner中
 		nilAwareAdd(&cfg.Learners, id)
 		prs[id].IsLearner = true
 	}
@@ -117,6 +122,7 @@ func (c Changer) LeaveJoint() (tracker.Config, tracker.ProgressMap, error) {
 		}
 	}
 	*outgoingPtr(&cfg.Voters) = nil
+	// 配置转换完之后，autoLeave置为false
 	cfg.AutoLeave = false
 
 	return checkAndReturn(cfg, prs)
@@ -139,6 +145,7 @@ func (c Changer) Simple(ccs ...pb.ConfChangeSingle) (tracker.Config, tracker.Pro
 	if err := c.apply(&cfg, prs, ccs...); err != nil {
 		return c.err(err)
 	}
+	// 判断差异性
 	if n := symdiff(incoming(c.Tracker.Voters), incoming(cfg.Voters)); n > 1 {
 		return tracker.Config{}, nil, errors.New("more than one voter changed without entering joint config")
 	}
@@ -149,6 +156,7 @@ func (c Changer) Simple(ccs ...pb.ConfChangeSingle) (tracker.Config, tracker.Pro
 // apply a change to the configuration. By convention, changes to voters are
 // always made to the incoming majority config Voters[0]. Voters[1] is either
 // empty or preserves the outgoing majority configuration while in a joint state.
+// 应用配置下信息变更
 func (c Changer) apply(cfg *tracker.Config, prs tracker.ProgressMap, ccs ...pb.ConfChangeSingle) error {
 	for _, cc := range ccs {
 		if cc.NodeID == 0 {
@@ -177,19 +185,24 @@ func (c Changer) apply(cfg *tracker.Config, prs tracker.ProgressMap, ccs ...pb.C
 
 // makeVoter adds or promotes the given ID to be a voter in the incoming
 // majority config.
+// 添加节点到voter[0]信息中
+// 角色变为voter
 func (c Changer) makeVoter(cfg *tracker.Config, prs tracker.ProgressMap, id uint64) {
 	pr := prs[id]
-	if pr == nil {
+	if pr == nil { // 如果pr中不存在，则初始化pr信息
 		c.initProgress(cfg, prs, id, false /* isLearner */)
 		return
 	}
 
 	pr.IsLearner = false
+	// 把id从learner及learnerNext中删除
 	nilAwareDelete(&cfg.Learners, id)
 	nilAwareDelete(&cfg.LearnersNext, id)
+	// 写入到voter[0]中
 	incoming(cfg.Voters)[id] = struct{}{}
 }
 
+// 角色变为learner
 // makeLearner makes the given ID a learner or stages it to be a learner once
 // an active joint configuration is exited.
 //
@@ -203,16 +216,20 @@ func (c Changer) makeVoter(cfg *tracker.Config, prs tracker.ProgressMap, id uint
 // simultaneously. Instead, we add the learner to LearnersNext, so that it will
 // be added to Learners the moment the outgoing config is removed by
 // LeaveJoint().
+// 将节点添加为learner
 func (c Changer) makeLearner(cfg *tracker.Config, prs tracker.ProgressMap, id uint64) {
+	// 节点信息不存在则初始化
 	pr := prs[id]
 	if pr == nil {
 		c.initProgress(cfg, prs, id, true /* isLearner */)
 		return
 	}
+	// 本身是learner，直接返回
 	if pr.IsLearner {
 		return
 	}
 	// Remove any existing voter in the incoming config...
+	// 删除节点信息（voter，learner，learnerNext中）
 	c.remove(cfg, prs, id)
 	// ... but save the Progress.
 	prs[id] = pr
@@ -221,37 +238,43 @@ func (c Changer) makeLearner(cfg *tracker.Config, prs tracker.ProgressMap, id ui
 	// be turned into a learner in LeaveJoint().
 	//
 	// Otherwise, add a regular learner right away.
-	if _, onRight := outgoing(cfg.Voters)[id]; onRight {
+	if _, onRight := outgoing(cfg.Voters)[id]; onRight { // 如果存在新的配置中则写入到learnerNext中，避免影响投票
 		nilAwareAdd(&cfg.LearnersNext, id)
 	} else {
+		// 不存在voter中，直接写入learner
 		pr.IsLearner = true
 		nilAwareAdd(&cfg.Learners, id)
 	}
 }
 
 // remove this peer as a voter or learner from the incoming config.
+// 将节点信息删除（voter或learner中存储的信息）
 func (c Changer) remove(cfg *tracker.Config, prs tracker.ProgressMap, id uint64) {
 	if _, ok := prs[id]; !ok {
 		return
 	}
 
+	//voter[0]，learner，learnersNext都删除
 	delete(incoming(cfg.Voters), id)
 	nilAwareDelete(&cfg.Learners, id)
 	nilAwareDelete(&cfg.LearnersNext, id)
 
 	// If the peer is still a voter in the outgoing config, keep the Progress.
-	if _, onRight := outgoing(cfg.Voters)[id]; !onRight {
+	if _, onRight := outgoing(cfg.Voters)[id]; !onRight { // 如果存在voter[1]中，则保留prs中的信息
 		delete(prs, id)
 	}
 }
 
 // initProgress initializes a new progress for the given node or learner.
+// 初始化psr
 func (c Changer) initProgress(cfg *tracker.Config, prs tracker.ProgressMap, id uint64, isLearner bool) {
-	if !isLearner {
+	if !isLearner { // 写入到config[0].voter中，作为voter
 		incoming(cfg.Voters)[id] = struct{}{}
 	} else {
+		// learner则写入到learners中，作为learner
 		nilAwareAdd(&cfg.Learners, id)
 	}
+	// 初始化prs信息
 	prs[id] = &tracker.Progress{
 		// Initializing the Progress with the last index means that the follower
 		// can be probed (with the last index).
@@ -261,9 +284,9 @@ func (c Changer) initProgress(cfg *tracker.Config, prs tracker.ProgressMap, id u
 		// at all (and will thus likely need a snapshot), though the app may
 		// have applied a snapshot out of band before adding the replica (thus
 		// making the first index the better choice).
-		Next:      c.LastIndex,
+		Next:      c.LastIndex, //下一个同步的索引的位置
 		Match:     0,
-		Inflights: tracker.NewInflights(c.Tracker.MaxInflight),
+		Inflights: tracker.NewInflights(c.Tracker.MaxInflight), // 初始化同步的队列
 		IsLearner: isLearner,
 		// When a node is first added, we should mark it as recently active.
 		// Otherwise, CheckQuorum may cause us to step down if it is invoked
@@ -275,6 +298,10 @@ func (c Changer) initProgress(cfg *tracker.Config, prs tracker.ProgressMap, id u
 // checkInvariants makes sure that the config and progress are compatible with
 // each other. This is used to check both what the Changer is initialized with,
 // as well as what it returns.
+// 校验配置内的id的正确性，围绕着voters[0],voters[1]以及cfg的属性在校验
+// 当节点信息存在voter[1]中的时候，为了不影响投票，会先写入到learnerNext数组中
+// 当节点不存在任何voter数组中时，则直接写入到learner中
+// 所有节点信息都会存储在prs中
 func checkInvariants(cfg tracker.Config, prs tracker.ProgressMap) error {
 	// NB: intentionally allow the empty config. In production we'll never see a
 	// non-empty config (we prevent it from being created) but we will need to
@@ -282,6 +309,7 @@ func checkInvariants(cfg tracker.Config, prs tracker.ProgressMap) error {
 	// during tests). Instead of having to hand-code this, we allow
 	// transitioning from an empty config into any other legal and non-empty
 	// config.
+	// 判断所有的节点id都存在prs中
 	for _, ids := range []map[uint64]struct{}{
 		cfg.Voters.IDs(),
 		cfg.Learners,
@@ -297,15 +325,16 @@ func checkInvariants(cfg tracker.Config, prs tracker.ProgressMap) error {
 	// Any staged learner was staged because it could not be directly added due
 	// to a conflicting voter in the outgoing config.
 	for id := range cfg.LearnersNext {
+		// learnersNext属于voters[1]数组
 		if _, ok := outgoing(cfg.Voters)[id]; !ok {
 			return fmt.Errorf("%d is in LearnersNext, but not Voters[1]", id)
 		}
-		if prs[id].IsLearner {
+		if prs[id].IsLearner { // learnerNext不能被标记为learner
 			return fmt.Errorf("%d is in LearnersNext, but is already marked as learner", id)
 		}
 	}
 	// Conversely Learners and Voters doesn't intersect at all.
-	for id := range cfg.Learners {
+	for id := range cfg.Learners { // learner不参与投票，不存在voters[0].voters[1]里面
 		if _, ok := outgoing(cfg.Voters)[id]; ok {
 			return fmt.Errorf("%d is in Learners and Voters[1]", id)
 		}
@@ -317,9 +346,9 @@ func checkInvariants(cfg tracker.Config, prs tracker.ProgressMap) error {
 		}
 	}
 
-	if !joint(cfg) {
+	if !joint(cfg) { // voters[1]为空
 		// We enforce that empty maps are nil instead of zero.
-		if outgoing(cfg.Voters) != nil {
+		if outgoing(cfg.Voters) != nil { // 自己再校验一遍
 			return fmt.Errorf("cfg.Voters[1] must be nil when not joint")
 		}
 		if cfg.LearnersNext != nil {
@@ -348,6 +377,7 @@ func (c Changer) checkAndCopy() (tracker.Config, tracker.ProgressMap, error) {
 	return checkAndReturn(cfg, prs)
 }
 
+// 判断如果无效就返回空
 // checkAndReturn calls checkInvariants on the input and returns either the
 // resulting error or the input.
 func checkAndReturn(cfg tracker.Config, prs tracker.ProgressMap) (tracker.Config, tracker.ProgressMap, error) {
@@ -363,6 +393,7 @@ func (c Changer) err(err error) (tracker.Config, tracker.ProgressMap, error) {
 }
 
 // nilAwareAdd populates a map entry, creating the map if necessary.
+// 节点添加到map，不存在则初始化
 func nilAwareAdd(m *map[uint64]struct{}, id uint64) {
 	if *m == nil {
 		*m = map[uint64]struct{}{}
@@ -371,6 +402,7 @@ func nilAwareAdd(m *map[uint64]struct{}, id uint64) {
 }
 
 // nilAwareDelete deletes from a map, nil'ing the map itself if it is empty after.
+// 节点从map中删除id
 func nilAwareDelete(m *map[uint64]struct{}, id uint64) {
 	if *m == nil {
 		return
@@ -399,12 +431,18 @@ func symdiff(l, r map[uint64]struct{}) int {
 	return n
 }
 
+// 判断voters[1]是否存在值
 func joint(cfg tracker.Config) bool {
 	return len(outgoing(cfg.Voters)) > 0
 }
 
-func incoming(voters quorum.JointConfig) quorum.MajorityConfig      { return voters[0] }
-func outgoing(voters quorum.JointConfig) quorum.MajorityConfig      { return voters[1] }
+// 返回voters[0]
+func incoming(voters quorum.JointConfig) quorum.MajorityConfig { return voters[0] }
+
+// 返回voters[1]
+func outgoing(voters quorum.JointConfig) quorum.MajorityConfig { return voters[1] }
+
+// 返回voters[1]的指针
 func outgoingPtr(voters *quorum.JointConfig) *quorum.MajorityConfig { return &voters[1] }
 
 // Describe prints the type and NodeID of the configuration changes as a
